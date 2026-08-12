@@ -14,7 +14,8 @@ __all__ = ["revenue", "prices", "calendar", "sync"]
 # Import submodules first so the public functions defined below shadow the
 # module objects on the package (import twmarket.revenue would otherwise
 # rebind twmarket.revenue to the module).
-from . import revenue as _revenue_mod  # noqa: E402, F401
+from . import revenue as _revenue_mod  # noqa: E402
+from . import sync as _sync_mod  # noqa: E402
 
 
 def revenue(ticker, start=None, end=None, as_of=None):
@@ -44,5 +45,13 @@ def calendar(start, end):
 
 
 def sync():
-    """Snapshot job: record observed announce dates and restatements. Not yet implemented."""
-    raise NotImplementedError("Coming in v0.1 — see build plan")
+    """Snapshot job: record observed announce dates and restatements.
+
+    Re-fetches the current and prior month's MOPS bulk files, diffs against the
+    local store, and appends new observations (true first-seen announce dates;
+    restatements as new rows with is_restated=True). Run daily via cron for
+    real announce dates going forward.
+
+    Returns a DataFrame of newly appended observations (empty if none).
+    """
+    return _sync_mod.run_sync()
