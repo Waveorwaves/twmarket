@@ -14,6 +14,7 @@ __all__ = ["revenue", "prices", "calendar", "sync"]
 # Import submodules first so the public functions defined below shadow the
 # module objects on the package (import twmarket.revenue would otherwise
 # rebind twmarket.revenue to the module).
+from . import prices as _prices_mod  # noqa: E402
 from . import revenue as _revenue_mod  # noqa: E402
 from . import sync as _sync_mod  # noqa: E402
 
@@ -35,8 +36,16 @@ def revenue(ticker, start=None, end=None, as_of=None):
 
 
 def prices(ticker, start, end):
-    """Daily OHLCV for a TWSE-listed ticker. Not yet implemented."""
-    raise NotImplementedError("Coming in v0.1 — see build plan")
+    """Daily OHLCV for a TWSE-listed ticker (unadjusted raw exchange data).
+
+    Args:
+        ticker: e.g. "2330". Invalid tickers raise ValueError.
+        start, end: ISO dates (inclusive), e.g. "2025-01-01".
+
+    Returns a DataFrame with columns: date, open, high, low, close,
+    volume (shares), turnover (NTD). Cached month-by-month in ~/.twmarket.
+    """
+    return _prices_mod.get_prices(ticker, start, end)
 
 
 def calendar(start, end):

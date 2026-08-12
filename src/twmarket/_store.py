@@ -53,6 +53,22 @@ def list_revenue_periods() -> list[str]:
     )
 
 
+def _prices_path(key: str) -> Path:
+    return data_dir() / "prices" / f"{key}.parquet"
+
+
+def load_prices_month(key: str) -> pd.DataFrame | None:
+    """key = '{ticker}_{YYYY-MM}'. Returns None if not cached."""
+    path = _prices_path(key)
+    return pd.read_parquet(path) if path.exists() else None
+
+
+def save_prices_month(key: str, df: pd.DataFrame) -> None:
+    path = _prices_path(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(path, index=False)
+
+
 def append_revenue_observations(period: str, df: pd.DataFrame) -> None:
     """Append observation rows for one period (never overwrites existing rows)."""
     df = df.astype(REVENUE_COLUMNS)[list(REVENUE_COLUMNS)]
