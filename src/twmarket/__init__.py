@@ -14,6 +14,7 @@ __all__ = ["revenue", "prices", "calendar", "sync"]
 # Import submodules first so the public functions defined below shadow the
 # module objects on the package (import twmarket.revenue would otherwise
 # rebind twmarket.revenue to the module).
+from . import calendar as _calendar_mod  # noqa: E402
 from . import prices as _prices_mod  # noqa: E402
 from . import revenue as _revenue_mod  # noqa: E402
 from . import sync as _sync_mod  # noqa: E402
@@ -49,8 +50,15 @@ def prices(ticker, start, end):
 
 
 def calendar(start, end):
-    """Trading days between start and end. Not yet implemented."""
-    raise NotImplementedError("Coming in v0.1 — see build plan")
+    """Trading days between two ISO dates (inclusive).
+
+    Derived from 0050 price history, so typhoon closures and make-up
+    Saturdays are handled automatically. Cannot predict future trading
+    days; history begins 2010-01-04 (TWSE API limit).
+
+    Returns a DataFrame with a single `date` column.
+    """
+    return _calendar_mod.get_calendar(start, end)
 
 
 def sync():
