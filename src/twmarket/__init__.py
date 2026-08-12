@@ -18,8 +18,19 @@ from . import revenue as _revenue_mod  # noqa: E402, F401
 
 
 def revenue(ticker, start=None, end=None, as_of=None):
-    """Monthly revenue for a TWSE-listed ticker. Not yet implemented."""
-    raise NotImplementedError("Coming in v0.1 — see build plan")
+    """Monthly revenue for a TWSE-listed ticker.
+
+    Args:
+        ticker: e.g. "2330". Invalid tickers raise ValueError.
+        start, end: period range as "YYYY-MM" (inclusive). Defaults to full
+            history (2015-01 through last completed month).
+        as_of: ISO date; return only figures knowable on that date
+            (point-in-time view based on announce_date).
+
+    Returns a DataFrame with columns: ticker, period, revenue_twd, yoy_pct,
+    mom_pct, announce_date, announce_date_estimated, is_restated.
+    """
+    return _revenue_mod.get_revenue(ticker, start, end, as_of)
 
 
 def prices(ticker, start, end):
