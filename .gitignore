@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+
+# Local data store (never commit user data)
+.twmarket/
