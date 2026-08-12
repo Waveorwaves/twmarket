@@ -31,7 +31,11 @@ Verified against live endpoints on 2026-08-12. Recorded responses live in `tests
     → date, share volume, turnover (NTD), open, high, low, close, change, transactions, remark
   - Dates are **ROC format** (`114/06/02` = 2025-06-02); numbers are comma-separated strings.
   - Invalid ticker / no data: `stat` is an error message instead of `"OK"`.
-- **Fixture:** `tests/fixtures/stock_day_2330_202506.json` (2330, June 2025, 21 rows)
+  - **History limit:** queries before 2010-01-04 return
+    `查詢日期小於99年1月4日，請重新查詢!` — no data available.
+- **Fixtures:** `tests/fixtures/stock_day_2330_202506.json` (2330, June 2025, 21 rows);
+  `stock_day_0050_202501/202502.json` (2025 LNY closure: last trade 01-22, resume 02-03);
+  `stock_day_0050_201302.json` (2013-02-23 = make-up Saturday that traded)
 
 ## Rate limiting
 
