@@ -11,6 +11,11 @@ __version__ = "0.1.0"
 
 __all__ = ["revenue", "prices", "calendar", "sync"]
 
+# Import submodules first so the public functions defined below shadow the
+# module objects on the package (import twmarket.revenue would otherwise
+# rebind twmarket.revenue to the module).
+from . import revenue as _revenue_mod  # noqa: E402, F401
+
 
 def revenue(ticker, start=None, end=None, as_of=None):
     """Monthly revenue for a TWSE-listed ticker. Not yet implemented."""
