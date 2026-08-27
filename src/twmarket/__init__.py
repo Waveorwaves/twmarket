@@ -65,9 +65,13 @@ def sync():
     """Snapshot job: record observed announce dates and restatements.
 
     Re-fetches the current and prior month's MOPS bulk files, diffs against the
-    local store, and appends new observations (true first-seen announce dates;
-    restatements as new rows with is_restated=True). Run daily via cron for
-    real announce dates going forward.
+    local store, and appends new observations. A row first seen on or before its
+    statutory deadline gets that sighting as a true announce_date
+    (announce_date_estimated=False); a row first seen after the deadline was
+    filed at an unknowable earlier time, so it falls back to the deadline
+    estimate. Restatements append a new row with is_restated=True, dated the day
+    the change was observed. Run daily via cron for real announce dates going
+    forward.
 
     Returns a DataFrame of newly appended observations (empty if none).
     """

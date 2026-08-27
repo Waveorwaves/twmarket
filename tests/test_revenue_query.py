@@ -46,3 +46,33 @@ def test_as_of_before_announce_returns_empty(use_mops_fixture):
 def test_as_of_on_announce_returns_row(use_mops_fixture):
     df = tw.revenue("2330", "2025-06", "2025-06", as_of="2025-07-10")
     assert len(df) == 1
+
+
+def test_open_filing_window_is_not_cached(use_mops_fixture):
+    """A month is only frozen into the store once its filing window has closed.
+
+    Companies file throughout the window. Caching a snapshot taken on the 5th
+    would hide every filing that lands between then and the deadline — the store
+    is append-only and the month would read as complete forever.
+    """
+    from twmarket import _store
+    from twmarket.revenue import ensure_period
+
+    early = ensure_period("2025-06", today=dt.date(2025, 7, 5))
+    assert not early.empty  # still served to the caller
+    assert not _store.has_revenue_period("2025-06")
+
+    ensure_period("2025-06", today=dt.date(2025, 7, 11))
+    assert _store.has_revenue_period("2025-06")
+
+
+def test_open_window_refetches_until_settled(use_mops_fixture):
+    """Each query inside the open window goes back to MOPS for late filers."""
+    from twmarket.revenue import ensure_period
+
+    ensure_period("2025-06", today=dt.date(2025, 7, 5))
+    ensure_period("2025-06", today=dt.date(2025, 7, 8))
+    assert len(use_mops_fixture) == 2  # no stale cache served
+    ensure_period("2025-06", today=dt.date(2025, 7, 11))
+    ensure_period("2025-06", today=dt.date(2025, 7, 12))
+    assert len(use_mops_fixture) == 3  # settled, then served from the store

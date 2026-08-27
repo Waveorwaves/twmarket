@@ -74,3 +74,57 @@ def test_sync_after_backfill_marks_observed(fetch_returns):
     assert appended.empty
     df = tw.revenue("2330", "2025-06", "2025-06")
     assert df.iloc[0]["announce_date_estimated"]
+
+
+def test_sync_after_deadline_falls_back_to_estimate(fetch_returns):
+    """A cold start long after the deadline must not invent an announce date.
+
+    June 2025 revenue was filed by 2025-07-10. A snapshot first seeing it on
+    2025-08-01 knows only that it was filed some time before then, so it has to
+    fall back to the estimate — dating it 2025-08-01 would be three weeks late
+    *and* flagged authoritative.
+    """
+    appended = sync_period("2025-06", today=dt.date(2025, 8, 1))
+    row = appended[appended["ticker"] == "2330"].iloc[0]
+    assert row["announce_date"] == dt.date(2025, 7, 10)
+    assert row["announce_date_estimated"]
+    assert row["observed_date"] == dt.date(2025, 8, 1)
+
+
+def test_restatement_is_observed_even_after_the_deadline(fetch_returns, mops_fixture_bytes):
+    """A value seen changing is genuinely observed, whenever that happens."""
+    sync_period("2025-06", today=dt.date(2025, 7, 8))
+    fetch_returns["content"] = mops_fixture_bytes.replace(TSMC_ORIGINAL, TSMC_REVISED)
+    appended = sync_period("2025-06", today=dt.date(2025, 7, 20))  # past the 07-10 deadline
+
+    row = appended[appended["ticker"] == "2330"].iloc[0]
+    assert row["is_restated"]
+    assert row["announce_date"] == dt.date(2025, 7, 20)
+    assert not row["announce_date_estimated"]
+
+
+def test_as_of_excludes_late_first_sighting_before_deadline(fetch_returns):
+    """The fallback date must hold up end-to-end through the as_of filter."""
+    sync_period("2025-06", today=dt.date(2025, 8, 1))
+    assert tw.revenue("2330", "2025-06", "2025-06", as_of="2025-07-09").empty
+    visible = tw.revenue("2330", "2025-06", "2025-06", as_of="2025-07-10")
+    assert len(visible) == 1
+    assert visible.iloc[0]["announce_date_estimated"]
+
+
+def test_partial_month_from_an_early_sync_is_topped_up(fetch_returns, mops_fixture_bytes):
+    """A snapshot taken before the deadline must not freeze the month.
+
+    sync() writes a period file whenever it runs, including on the 5th when most
+    companies have not filed. Later queries have to notice that every row in
+    that file predates the deadline and go back for the ones that came after.
+    """
+    not_yet_filed = mops_fixture_bytes.replace(TSMC_ORIGINAL, b"                      -")
+    fetch_returns["content"] = not_yet_filed
+    sync_period("2025-06", today=dt.date(2025, 7, 5))
+    stored = _store.load_revenue_period("2025-06")
+    assert stored[stored["ticker"] == "2330"].empty  # nothing filed for 2330 yet
+
+    fetch_returns["content"] = mops_fixture_bytes  # 2330 files before the deadline
+    df = tw.revenue("2330", "2025-06", "2025-06", as_of="2025-07-31")
+    assert df.iloc[0]["revenue_twd"] == 263_708_978_000

@@ -13,7 +13,8 @@ that are Chinese-only and hard to navigate programmatically.
   (announce dates + restatement tracking, so your backtests don't cheat)
 - **Daily prices** (unadjusted raw exchange data) from the official TWSE API
 - **Trading calendar** derived from actual price history (typhoon closures and
-  make-up Saturdays handled automatically)
+  make-up Saturdays handled automatically), taken as the union of several reference
+  instruments so a single stock's suspension can't masquerade as a market holiday
 
 All data is cached locally in `~/.twmarket/` (parquet) — fetch once, query forever.
 Requests are politely rate-limited (≥1 s spacing).
@@ -65,16 +66,26 @@ The MOPS bulk files preserve **no historical filing timestamps** — their repor
 generated at fetch time. So:
 
 - **Backfilled history** gets `announce_date` = statutory deadline (10th of the following
-  month, rolled forward past weekends), flagged `announce_date_estimated=True`.
-  Conservative by design: most companies file earlier, so using the deadline can never
-  introduce lookahead bias — but backtest signals will lag reality by a few days.
+  month, rolled forward to the next **trading day**), flagged
+  `announce_date_estimated=True`. The roll uses the real trading calendar, not just
+  weekends: the 10th lands inside the Lunar New Year closure often enough to matter
+  (January 2013 revenue was due 2013-02-10, but the market did not reopen until
+  2013-02-18). Conservative by design: most companies file earlier, so using the deadline
+  can never introduce lookahead bias — but backtest signals will lag reality by a few days.
 - **Going forward**, run `tw.sync()` daily (e.g. cron). It re-fetches the current and
-  prior month's files, diffs against the local store, and records the **true first-seen
-  date** as `announce_date` (`announce_date_estimated=False`).
+  prior month's files and diffs against the local store. If a figure appears **on or
+  before** its deadline, that sighting is a real announce date
+  (`announce_date_estimated=False`) — this is what running `sync()` buys you. If it first
+  appears **after** the deadline (a cold start, or a cron that was down), it was filed at
+  a time MOPS does not record, so `twmarket` falls back to the deadline estimate and says
+  so rather than dating the figure late and calling it authoritative.
 - **Restatements**: a changed figure between snapshots is appended as a *new* observation
   with `is_restated=True` and its own date. The original row is **never discarded** —
   `tw.revenue(..., as_of=...)` returns exactly what was knowable at that date.
   Restatement detection only works from the date you start running `sync()`.
+- **Months still being filed are never cached.** A period whose deadline hasn't passed is
+  re-fetched on every query, so companies that file late in the window still show up.
+  Once the deadline passes, the month is frozen into the store and served from disk.
 - `yoy_pct` / `mom_pct` come from MOPS as published; they may diverge from values you
   compute from stored revenue around mergers and restatements.
 

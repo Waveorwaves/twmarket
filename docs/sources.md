@@ -1,6 +1,7 @@
 # Data sources
 
-Verified against live endpoints on 2026-08-12. Recorded responses live in `tests/fixtures/`.
+Verified against live endpoints on 2026-08-12; calendar reference fixtures added
+2026-08-26. Recorded responses live in `tests/fixtures/`.
 
 ## Monthly revenue — MOPS bulk file (t21sc03)
 
@@ -33,9 +34,20 @@ Verified against live endpoints on 2026-08-12. Recorded responses live in `tests
   - Invalid ticker / no data: `stat` is an error message instead of `"OK"`.
   - **History limit:** queries before 2010-01-04 return
     `查詢日期小於99年1月4日，請重新查詢!` — no data available.
-- **Fixtures:** `tests/fixtures/stock_day_2330_202506.json` (2330, June 2025, 21 rows);
-  `stock_day_0050_202501/202502.json` (2025 LNY closure: last trade 01-22, resume 02-03);
-  `stock_day_0050_201302.json` (2013-02-23 = make-up Saturday that traded)
+- **Reference instruments for the calendar:** a single stock is not a safe proxy for
+  market opening. 0050 has **no rows from 2025-06-11 to 2025-06-17** (suspended around
+  its 1:4 split) while 2330 traded every one of those days. The calendar therefore takes
+  the **union** over `calendar.REFERENCE_TICKERS` (0050, 2330): a stock can only trade
+  when the market is open, so a suspension can remove a day from one series but never
+  invent one. Announce-date estimation asks the primary reference first and only pays for
+  the union when the deadline is missing from it.
+- **Fixtures:** `stock_day_2330_202506.json` (June 2025, 21 rows) and
+  `stock_day_0050_202506.json` (16 rows — the split suspension, side by side);
+  `stock_day_{0050,2330}_202501/202502.json` (2025 LNY closure: last trade 01-22, resume
+  02-03); `stock_day_{0050,2330}_201302.json` (LNY closure 02-07 to 02-17, and
+  2013-02-23 = a make-up Saturday that traded); `stock_day_0050_202505/202507.json`
+  (announce-deadline windows); `stock_day_0050_200912.json` (the real
+  `查詢日期小於99年1月4日` response for a date below the history floor)
 
 ## Rate limiting
 

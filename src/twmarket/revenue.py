@@ -3,14 +3,28 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import re
 
 import pandas as pd
 
 from . import _client, _store
-from ._dates import estimate_announce_date, gregorian_year_to_roc, parse_period
+from ._dates import (
+    estimate_announce_date,
+    gregorian_year_to_roc,
+    parse_period,
+    statutory_deadline,
+)
+from .calendar import REFERENCE_TICKERS, trading_days
+
+logger = logging.getLogger("twmarket")
 
 BACKFILL_START = "2015-01"
+
+#: How far past the statutory deadline to look for the next trading day. The
+#: longest TWSE closure is the Lunar New Year break (~9 calendar days), and
+#: 10 + 14 stays inside the same month, so this costs one cached price-month.
+ANNOUNCE_ROLL_WINDOW_DAYS = 14
 
 _TICKER_RE = re.compile(r"^\d{4,6}$")
 
@@ -80,18 +94,100 @@ def _last_completed_period(today: dt.date | None = None) -> str:
     return f"{y:04d}-{m:02d}"
 
 
-def ensure_period(period: str) -> None:
-    """Fetch, parse, and store one bulk month if not already cached."""
-    if _store.has_revenue_period(period):
-        return
+def announce_date_for(period: str) -> dt.date:
+    """Estimated announce date: the deadline rolled to the next *trading* day.
+
+    Rolling over weekends alone is not conservative enough. The 10th lands
+    inside the Lunar New Year closure often enough to matter: January 2013
+    revenue was due Sunday 2013-02-10, the weekday roll lands on Monday
+    2013-02-11, and TWSE did not trade again until 2013-02-18.
+    An announce date on a closed market is a week earlier than the market could
+    possibly have reacted — exactly the lookahead bias this package exists to
+    prevent — so the real trading calendar decides.
+
+    One cached price-month per call, and usually one request: a deadline that
+    already appears in the primary reference's history is proof the market was
+    open, so no second reference is consulted.
+
+    Beyond available price history (a deadline still in the future, or before
+    the 2010 floor) no calendar exists; that falls back to the weekday-only
+    roll, which can name a market holiday. `ensure_period` avoids storing such
+    a date by refusing to cache a period whose deadline has not passed.
+    """
+    deadline = statutory_deadline(period)
+    horizon = (deadline + dt.timedelta(days=ANNOUNCE_ROLL_WINDOW_DAYS)).isoformat()
+    days = trading_days(deadline.isoformat(), horizon, tickers=REFERENCE_TICKERS[:1])
+    if deadline not in days:
+        # Absence in one instrument is ambiguous (holiday or suspension), so pay
+        # for the full union before concluding the market was closed.
+        days = trading_days(deadline.isoformat(), horizon)
+    later = sorted(d for d in days if d >= deadline)
+    if later:
+        return later[0]
+    logger.info(
+        "no trading calendar covering the %s deadline (%s) — falling back to the "
+        "weekday-only estimate",
+        period,
+        deadline,
+    )
+    return estimate_announce_date(period)
+
+
+def _is_settled(stored: pd.DataFrame, period: str) -> bool:
+    """True if some stored observation postdates the period's filing deadline.
+
+    Rows written while the filing window was still open — by an early query, or
+    by a `sync()` that ran before the 10th — can be missing every company that
+    filed later, so the file cannot be taken as complete.
+    """
+    last_seen = max(stored["observed_date"])
+    # Cheap bound first: past the widest possible roll no calendar is needed,
+    # which keeps the fully-cached query path free of price lookups.
+    if last_seen > statutory_deadline(period) + dt.timedelta(days=ANNOUNCE_ROLL_WINDOW_DAYS):
+        return True
+    return last_seen > announce_date_for(period)
+
+
+def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
+    """All stored observations for one period, fetching the bulk file if needed.
+
+    A period whose filing deadline has not passed is fetched but **not cached**.
+    Companies file throughout the window, so freezing an early snapshot would
+    hide every filing that lands after it: the store is append-only and the
+    month would read as complete forever. A period already holding rows that
+    were all observed while the window was open is topped up through the differ,
+    which appends late filers without duplicating what is already held.
+    """
+    today = today or dt.date.today()
+    stored = _store.load_revenue_period(period)
+    if stored is not None and not stored.empty:
+        if _is_settled(stored, period):
+            return stored
+        from .sync import sync_period  # deferred: sync builds on this module
+
+        sync_period(period, today=today)
+        return _store.load_revenue_period(period)
+
     year, month = parse_period(period)
+    logger.info("fetching MOPS bulk file for %s", period)
     content = _client.fetch_mops_revenue(gregorian_year_to_roc(year), month)
     df = parse_bulk_file(content, period)
-    df["announce_date"] = estimate_announce_date(period)
+    announce = announce_date_for(period)
+    df["announce_date"] = announce
     df["announce_date_estimated"] = True
     df["is_restated"] = False
-    df["observed_date"] = dt.date.today()
-    _store.append_revenue_observations(period, df)
+    df["observed_date"] = today
+    df = _store.normalize_revenue(df)
+
+    if today > announce:
+        _store.append_revenue_observations(period, df)
+    else:
+        logger.info(
+            "%s filing window is still open (deadline %s) — serving fresh, not caching",
+            period,
+            announce,
+        )
+    return df
 
 
 def get_revenue(
@@ -113,8 +209,7 @@ def get_revenue(
 
     frames, seen_anywhere = [], False
     for period in _month_range(start, end):
-        ensure_period(period)
-        df = _store.load_revenue_period(period)
+        df = ensure_period(period)
         if df is None or df.empty:
             continue
         seen_anywhere = seen_anywhere or (df["ticker"] == ticker).any()

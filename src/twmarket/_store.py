@@ -69,9 +69,18 @@ def save_prices_month(key: str, df: pd.DataFrame) -> None:
     df.to_parquet(path, index=False)
 
 
+def normalize_revenue(df: pd.DataFrame) -> pd.DataFrame:
+    """Coerce observation rows to the stored column set and dtypes.
+
+    Applied on the way into the store, and to rows served without being stored,
+    so callers see identical frames either way.
+    """
+    return df.astype(REVENUE_COLUMNS)[list(REVENUE_COLUMNS)]
+
+
 def append_revenue_observations(period: str, df: pd.DataFrame) -> None:
     """Append observation rows for one period (never overwrites existing rows)."""
-    df = df.astype(REVENUE_COLUMNS)[list(REVENUE_COLUMNS)]
+    df = normalize_revenue(df)
     path = _revenue_path(period)
     existing = pd.read_parquet(path) if path.exists() else None
     if existing is not None:

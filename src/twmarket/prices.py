@@ -94,9 +94,12 @@ def get_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
     start_d, end_d = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
     if start_d > end_d:
         raise ValueError(f"start {start} is after end {end}")
-    frames = [ensure_month(ticker, y, m) for y, m in _months_between(start_d, end_d)]
-    df = pd.concat([f for f in frames if not f.empty], ignore_index=True) if frames else _empty()
-    if df.empty:
+    months = [ensure_month(ticker, y, m) for y, m in _months_between(start_d, end_d)]
+    # Every month can come back empty (range outside available history, or a
+    # ticker TWSE has no data for) — that is an empty result, not an error.
+    frames = [f for f in months if not f.empty]
+    if not frames:
         return _empty()
+    df = pd.concat(frames, ignore_index=True)
     df = df[(df["date"] >= start_d) & (df["date"] <= end_d)]
     return df.sort_values("date").reset_index(drop=True)

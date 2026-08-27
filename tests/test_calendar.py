@@ -51,3 +51,20 @@ def test_calendar_returns_sorted_dates(use_0050_fixtures):
     assert list(df.columns) == ["date"]
     assert list(df["date"]) == sorted(df["date"])
     assert len(df) == 15  # trading days in Jan 2025
+
+
+def test_reference_suspension_is_not_a_market_holiday(use_0050_fixtures):
+    """0050 was suspended around its 2025-06 split; the market stayed open.
+
+    A calendar built on one instrument would report five phantom holidays here,
+    which would push every announce-date estimate in that window a week late.
+    """
+    import json as _json
+
+    days = set(tw.calendar("2025-06-01", "2025-06-30")["date"])
+    suspended = [dt.date(2025, 6, d) for d in (11, 12, 13, 16, 17)]
+    assert all(d in days for d in suspended)
+
+    only_0050 = _json.loads((FIXTURES / "stock_day_0050_202506.json").read_text())
+    dates_0050 = {r[0] for r in only_0050["data"]}
+    assert not any(f"114/06/{d.day:02d}" in dates_0050 for d in suspended)
