@@ -72,8 +72,14 @@ generated at fetch time. So:
   `announce_date_estimated=True`. The roll uses the real trading calendar, not just
   weekends: the 10th lands inside the Lunar New Year closure often enough to matter
   (January 2013 revenue was due 2013-02-10, but the market did not reopen until
-  2013-02-18). Conservative by design: most companies file earlier, so using the deadline
-  can never introduce lookahead bias — but backtest signals will lag reality by a few days.
+  2013-02-18). For a company that files on time this is conservative: it filed on or
+  before the deadline, so the estimate is never early, only a few days late.
+  **For a company that files late, the estimate is early** — it names a deadline the
+  company missed — and that is lookahead. This is not rare enough to ignore: for July
+  2026, 13 of the 31 financial-sector companies (Fubon, Cathay, CTBC and others) were
+  still missing from MOPS two days after the deadline. That is one observed month, not a
+  measured pattern. If it matters to your backtest, treat rows with
+  `announce_date_estimated=True` as "deadline, possibly a few days more", or lag them.
 - **Going forward**, run `tw.sync()` daily (e.g. cron). It re-fetches the current and
   prior month's files and diffs against the local store. If a figure appears **on or
   before** its deadline, that sighting is a real announce date
@@ -84,14 +90,23 @@ generated at fetch time. So:
 - **Late filers are dated when they actually appear.** Each `sync()` records that it
   looked, even on days nothing changed. So if a check after the deadline did not have a
   company and a later one does, that company filed late, and its `announce_date` is the
-  day it showed up — not the deadline it missed.
+  day it showed up — not the deadline it missed. An observed date is as precise as your
+  checks are frequent: daily `sync()` gives the day, a month-long gap gives the month.
+  One case still falls back to the estimate: if no check ran between the deadline and the
+  late filing (the cron was down across it), nothing shows the company was absent.
 - **Restatements**: a changed figure between snapshots is appended as a *new* observation
   with `is_restated=True` and its own date. The original row is **never discarded** —
   `tw.revenue(..., as_of=...)` returns exactly what was knowable at that date.
   Restatement detection only works from the date you start running `sync()`.
-- **Months still being filed are never cached.** A period whose deadline hasn't passed is
-  re-fetched on every query, so companies that file late in the window still show up.
-  Once the deadline passes, the month is frozen into the store and served from disk.
+- **A month is not final until the end of the month after it.** Before its deadline it
+  is not cached at all. After the deadline it is stored, but every query still compares
+  it with MOPS (one request), because late filers keep arriving. Once the following month
+  has ended — when `sync()` stops re-checking it too — one last comparison makes it
+  final, and it is served from disk from then on.
+- **`as_of` means "known by the end of that day".** `announce_date` is a calendar date
+  and companies can file after the 13:30 close, so a figure with `announce_date` D may
+  not have been tradable on D. Act on it from the next trading day
+  (`tw.next_trading_day(D)`).
 - **Every date is a Taiwan date**, whatever timezone your machine is in. A cron job in
   Chicago or London still stamps observations with the date in Taipei, so a filing never
   looks like it was knowable the day before it happened.
@@ -102,10 +117,11 @@ generated at fetch time. So:
 
 - Malformed ticker → `ValueError` (all functions). Tickers are strings: `"0050"`, not
   `50` — a number can't carry the leading zero.
-- `revenue()` looks the ticker up in one month first — the latest month of your range
-  whose filing window has closed — so a typo fails after a single request instead of
-  after the whole backfill. Not in that month → `ValueError`. For a **delisted** company,
-  pass an `end` no later than its last month.
+- `revenue()` looks the ticker up in one month first — the latest *final* month of your
+  range — so a typo fails after a single request instead of after the whole backfill.
+  Not in that month → `ValueError`. For a **delisted** company, pass an `end` no later
+  than its last month. A recent month that can still gain late filers is never used as
+  evidence that a ticker doesn't exist.
 - `revenue()`: ticker found, but nothing knowable yet (e.g. `as_of` before the announce
   date, or a month it hasn't filed for yet) → empty DataFrame with the correct columns
   and dtypes.

@@ -30,6 +30,13 @@ Verified against live endpoints on 2026-08-12; calendar reference fixtures added
   - **2012-12 and earlier:** 10 cells (no remarks column), and the figures predate the
     move to IFRS consolidated revenue, so they are not comparable with later months.
     **Not supported:** `revenue()` rejects a `start` before `2013-01`.
+- **Filings arrive after the deadline too** (observed 2026-08-12 vs 2026-10-01, period
+  115/7): two days after the 08-10 deadline the file held 980 companies; it now holds
+  993. The 14 that arrived later are 13 of the 31 companies in 金融保險業 — ten
+  financial holding companies (2880, 2881, 2882, 2883, 2885, 2886, 2887, 2891, 2892,
+  5880) and three insurers (2816, 2850, 2851) — plus one new listing (7812). One month only;
+  whether this is systematic is unknown. Hence a month is re-checked until the end of the
+  month after it, and deadline estimates are documented as early for late filers.
 - **Unpublished month (nobody has filed yet):** **HTTP 200, not 404** — a ~900-byte
   page with the table title and `查無資料` ("no data found"). Checked 2026-09-28 for the
   current month (115/9) and a future one (115/12). `parse_bulk_file` returns an empty

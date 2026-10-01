@@ -26,10 +26,12 @@ version bump, tags, and the PyPI publish.
 | P2 — `parse_bulk_file` fails open | ✅ Done: zero-row raise, row floor, 合計 check removed |
 | P2 — spec conflicts with `twmarket.md` | ✅ All four resolved |
 | Review 2026-09-29 — four further defects | ✅ Done, `d954ea6` (see "Independent review") |
-| Found 2026-10-01 — late filers, re-downloads, pre-2013 | ✅ Done 2026-10-01 (see "Found after the review") |
+| Found 2026-10-01 — late filers, re-downloads, pre-2013 | ✅ Done, `9babe53` (see "Found after the review") |
+| Review 2026-10-01 — months frozen too early; README overclaim | ✅ Done 2026-10-01 (see "Second review") |
+| Open question — do financials file late every month? | **Unknown.** Needs daily `sync()` across a 10th–20th |
 | P3 — repository hygiene | **Open — next.** History decision made (leave as is) |
 
-Current tree: 123 tests pass on Python 3.12 / pandas 3 and Python 3.10 / pandas 2.3 (the
+Current tree: 169 tests pass on Python 3.12 / pandas 3 and Python 3.10 / pandas 2.3 (the
 CI matrix), `ruff check` clean, 98% coverage.
 
 ## Decisions
@@ -345,6 +347,47 @@ store has no locking.
 
 ---
 
+## Second review — 2026-10-01 (fixed the same day)
+
+The reviewer property-tested `9babe53` (`tests/test_checked_dates.py`: 40 random
+schedules of syncs and backfills against a known truth) and found no case where a late
+check proved absence and the row was still dated early. It did find:
+
+1. **The README promised estimates "can never introduce lookahead bias".** False for any
+   company that files after the deadline. Reworded: conservative for on-time filers,
+   early for late ones, with the observation below.
+2. **Late filers may be a whole group, not stragglers.** The owner's real store had
+   `2026-07` backfilled on 2026-08-12, two days after its deadline, with 980 rows; MOPS
+   now has 993. The 14 missing: ten financial holding companies (富邦金 2881, 國泰金 2882,
+   中信金 2891, 元大金 2885 …), three insurers, one new listing — 13 of the 31 companies in
+   金融保險業. **One month only; not known to be systematic.** See "Open question".
+3. **A month was frozen one check after its deadline**, so those 14 were missing for good
+   and `revenue("2881", "2026-07", "2026-07")` raised "unknown ticker" for 富邦金.
+
+   *Fix:* a stored month is final only once it has been compared with MOPS on or after
+   `recheck_window_end(period)` — the 1st of the second month after it, when `sync()`
+   stops covering it. Until then each query tops it up through the differ (one request).
+   The unknown-ticker lookup uses the same rule: a month that can still gain filers is
+   never evidence that a ticker does not exist. Verified on a copy of the real store:
+   2881 is returned after one request, then served from disk.
+4. **Smaller:** `as_of=D` includes figures filed after D's 13:30 close — README now says
+   to act from the next trading day. An unreadable `checked.json` is now ignored with a
+   warning instead of failing every call.
+
+**Still true, by design, and documented:** if no check runs between the deadline and a
+late filing (a cron down across the deadline), the late filer is dated at the deadline,
+flagged `estimated=True`. The flag is honest; the date is early.
+
+### Open question — is late filing by financials systematic?
+
+If financial holding companies file after the 10th every month, every *backfilled* month
+dates them a few days early, and the fix would be a later estimate for that industry
+(v0.2 material: it needs the industry column). One month is not evidence of that. To
+find out, run `tw.sync()` daily from the 5th to the 20th of any month and look at which
+tickers get `announce_date` after the deadline.
+
+---
+
 ## P3 — Repository hygiene
 
 Independent of the code. Can be done in any order, except that **5 waits for P1 and
@@ -420,6 +463,8 @@ The v0.2 parking lot exists. Use it.
 - [x] The four defects from the 2026-09-29 review fixed (2026-10-01)
 - [x] Late filers dated when they appear; settled months not re-downloaded; revenue
       served from 2013-01 with earlier ranges rejected (2026-10-01)
+- [x] Months re-checked until their window closes; README no longer claims estimates
+      are never early (2026-10-01)
 - [x] History decision made: leave as is (2026-09-28)
 - [ ] `v0.1.0` and `v0.1.1` tagged
 - [ ] `v0.1.1` published to PyPI by trusted publishing from the tag; README install line

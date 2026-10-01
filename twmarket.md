@@ -70,7 +70,10 @@ fetch-time report-generation date, not a filing date). Confirmed, not a maybe. T
   *(Amended 2026-10-01: each sync also records that it looked. A first sighting after
   the deadline falls back to the deadline estimate only when no earlier check on or after
   the deadline exists; if one does, the row arrived late and is dated the day it appeared.
-  Revenue history starts at 2013-01, when MOPS moved to IFRS consolidated revenue.)*
+  Revenue history starts at 2013-01, when MOPS moved to IFRS consolidated revenue.
+  A stored month keeps being re-checked on query until the end of the month after it,
+  because companies do file after the deadline; "conservative" above holds only for
+  on-time filers, and a late filer's estimate is early.)*
 - **Restatements:** a changed figure between snapshots = new observation row with its own
   observed date and `is_restated=True`. **Never discard the original row** — that
   reintroduces the lookahead bias this package exists to prevent. Default query returns
@@ -100,7 +103,8 @@ announce_date_estimated, is_restated`. Prices: `date, open, high, low, close, vo
 
 **Error semantics:** malformed ticker → `ValueError` everywhere; tickers are strings
 (`"0050"`, never an int, which cannot carry the leading zero). `revenue()`: ticker absent
-from the latest *settled* month of the range → `ValueError` (it may be a typo, delisted,
+from the latest *final* month of the range (one whose re-check window has closed) →
+`ValueError` (it may be a typo, delisted,
 or not yet listed — the message says so and how to adjust the range); a month that is
 unpublished or still being filed is never evidence of absence; ticker known but no rows
 survive the query (e.g. `as_of` before any announce date) → empty DataFrame with correct

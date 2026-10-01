@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import os
 import re
 from pathlib import Path
 
 import pandas as pd
+
+logger = logging.getLogger("twmarket")
 
 REVENUE_COLUMNS = {
     "ticker": "string",
@@ -54,19 +57,29 @@ def _checked_path() -> Path:
     return data_dir() / "revenue" / "checked.json"
 
 
-def revenue_last_checked(period: str) -> dt.date | None:
-    """Date the store was last brought level with MOPS for this period, if recorded."""
+def _load_checks() -> dict[str, str]:
     path = _checked_path()
     if not path.exists():
-        return None
-    value = json.loads(path.read_text()).get(period)
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        # Losing the check dates is safe: callers fall back to the newest stored
+        # observation, which can only make a date an estimate, never earlier.
+        logger.warning("%s is unreadable; ignoring it and starting a new one", path)
+        return {}
+
+
+def revenue_last_checked(period: str) -> dt.date | None:
+    """Date the store was last brought level with MOPS for this period, if recorded."""
+    value = _load_checks().get(period)
     return dt.date.fromisoformat(value) if value else None
 
 
 def mark_revenue_checked(period: str, date: dt.date) -> None:
     """Record that the store matched MOPS for this period on `date`."""
     path = _checked_path()
-    checks = json.loads(path.read_text()) if path.exists() else {}
+    checks = _load_checks()
     if checks.get(period, "") < date.isoformat():
         checks[period] = date.isoformat()
         path.parent.mkdir(parents=True, exist_ok=True)

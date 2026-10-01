@@ -192,20 +192,26 @@ def last_checked(period: str, stored: pd.DataFrame | None) -> dt.date | None:
     return max(dates) if dates else None
 
 
-def _is_settled(stored: pd.DataFrame, period: str) -> bool:
-    """True if the store was compared with MOPS after the period's filing deadline.
+def recheck_window_end(period: str) -> dt.date:
+    """First day on which `period` is final: the 1st of the second month after it.
 
-    Rows written while the filing window was still open — by an early query, or
-    by a `sync()` that ran before the 10th — can be missing every company that
-    filed later, so the file cannot be taken as complete until something has
-    looked again after the deadline.
+    `sync()` re-checks the current and the previous month, so a period keeps being
+    compared with MOPS until the month after it ends. The filing deadline is not
+    the end of the story: for July 2026, 13 of the 31 financial-sector companies
+    were still missing from MOPS two days after the deadline.
     """
-    checked = last_checked(period, stored)
-    # Cheap bound first: past the widest possible roll no calendar is needed,
-    # which keeps the fully-cached query path free of price lookups.
-    if checked > statutory_deadline(period) + dt.timedelta(days=ANNOUNCE_ROLL_WINDOW_DAYS):
-        return True
-    return checked > announce_date_for(period)
+    year, month = parse_period(period)
+    months = year * 12 + (month - 1) + 2
+    return dt.date(months // 12, months % 12 + 1, 1)
+
+
+def _is_final(stored: pd.DataFrame, period: str) -> bool:
+    """True once the store was compared with MOPS after the re-check window closed.
+
+    Until then the stored month can be missing companies that file late, so every
+    query tops it up through the differ (one request) instead of trusting it.
+    """
+    return last_checked(period, stored) >= recheck_window_end(period)
 
 
 def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
@@ -214,14 +220,14 @@ def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
     A period whose filing deadline has not passed is fetched but **not cached**.
     Companies file throughout the window, so freezing an early snapshot would
     hide every filing that lands after it: the store is append-only and the
-    month would read as complete forever. A period already holding rows that
-    were all observed while the window was open is topped up through the differ,
-    which appends late filers without duplicating what is already held.
+    month would read as complete forever. A stored period that is not final yet
+    (see `recheck_window_end`) is topped up through the differ, which appends
+    late filers without duplicating what is already held.
     """
     today = today or taipei_today()
     stored = _store.load_revenue_period(period)
     if stored is not None and not stored.empty:
-        if _is_settled(stored, period):
+        if _is_final(stored, period):
             return stored
         from .sync import sync_period  # deferred: sync builds on this module
 
@@ -257,24 +263,16 @@ def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
 
 
 def _probe_order(periods: list[str], today: dt.date) -> list[tuple[str, bool]]:
-    """Months to look a ticker up in, as (period, settled), most conclusive first.
+    """Months to look a ticker up in, as (period, final), most conclusive first.
 
-    A settled month — its filing window has closed — is complete, so a listed
-    company is certain to be in it. Those come first, latest first. Months still
-    being filed follow: finding the ticker there proves it exists, but not
-    finding it proves nothing.
+    A final month — its re-check window has closed — is complete, so a listed
+    company is certain to be in it. Those come first, latest first. Months that
+    can still gain filers follow: finding the ticker there proves it exists, but
+    not finding it proves nothing.
     """
-    open_window = []
-    last = len(periods) - 1
-    while last >= 0:
-        period = periods[last]
-        # The deadline itself is a cheap lower bound; only ask the calendar for
-        # the rolled date once that has passed.
-        if today > statutory_deadline(period) and today > announce_date_for(period):
-            break
-        open_window.append((period, False))
-        last -= 1
-    return [(p, True) for p in reversed(periods[: last + 1])] + open_window
+    final = [p for p in periods if today >= recheck_window_end(p)]
+    still_open = periods[len(final) :]
+    return [(p, True) for p in reversed(final)] + [(p, False) for p in reversed(still_open)]
 
 
 def get_revenue(
@@ -289,11 +287,11 @@ def get_revenue(
     (rate-limited: about one request per uncached month, at least 1s apart).
     Default range is BACKFILL_START through the last completed month.
 
-    The ticker is looked up in one month first — the latest settled month of the
-    range — so a mistyped ticker fails after a single fetch instead of after the
-    whole backfill. A company that is not in that month raises ValueError even
-    if it appears earlier in the range; for a delisted company pass an `end` no
-    later than its last month.
+    The ticker is looked up in one month first — the latest final month of the
+    range, one whose filing and re-check window has closed — so a mistyped ticker
+    fails after a single fetch instead of after the whole backfill. A company
+    that is not in that month raises ValueError even if it appears earlier in
+    the range; for a delisted company pass an `end` no later than its last month.
     """
     # Strings only: an int cannot carry a leading zero (0050 would arrive as 50).
     if not isinstance(ticker, str) or not _TICKER_RE.fullmatch(ticker):
@@ -311,18 +309,18 @@ def get_revenue(
 
     today = taipei_today()
     loaded: dict[str, pd.DataFrame] = {}
-    for period, settled in _probe_order(periods, today):
+    for period, final in _probe_order(periods, today):
         df = loaded[period] = ensure_period(period, today)
         if (df["ticker"] == ticker).any():
             break
-        if settled and not df.empty:
+        if final and not df.empty:
             raise ValueError(
                 f"unknown ticker: {ticker!r} is not in MOPS's {period} file, the latest "
-                "settled month of the requested range. Check for a typo. For a delisted "
+                "final month of the requested range. Check for a typo. For a delisted "
                 "company pass an `end` no later than its last month; for a newly listed "
                 "one pass a range that starts at its first month."
             )
-        # Unpublished, or still being filed: absence here proves nothing.
+        # Unpublished, or still able to gain late filers: absence proves nothing.
 
     frames = []
     for period in periods:

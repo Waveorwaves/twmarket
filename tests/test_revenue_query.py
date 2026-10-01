@@ -66,16 +66,31 @@ def test_open_filing_window_is_not_cached(use_mops_fixture):
     assert _store.has_revenue_period("2025-06")
 
 
-def test_open_window_refetches_until_settled(use_mops_fixture):
-    """Each query inside the open window goes back to MOPS for late filers."""
+def test_month_is_rechecked_until_its_window_closes(use_mops_fixture):
+    """A month is only final once it has been checked after its re-check window.
+
+    Before the deadline it is not cached at all. After the deadline it is cached,
+    but late filers keep arriving, so each query still compares it with MOPS until
+    the window closes at the end of the following month. One check after that
+    makes it final.
+    """
+    from twmarket import _store
     from twmarket.revenue import ensure_period
 
     ensure_period("2025-06", today=dt.date(2025, 7, 5))
     ensure_period("2025-06", today=dt.date(2025, 7, 8))
-    assert len(use_mops_fixture) == 2  # no stale cache served
-    ensure_period("2025-06", today=dt.date(2025, 7, 11))
+    assert len(use_mops_fixture) == 2  # filing window open: no stale cache served
+    assert not _store.has_revenue_period("2025-06")
+
+    ensure_period("2025-06", today=dt.date(2025, 7, 11))  # past the 07-10 deadline
     ensure_period("2025-06", today=dt.date(2025, 7, 12))
-    assert len(use_mops_fixture) == 3  # settled, then served from the store
+    assert len(use_mops_fixture) == 4  # stored now, but still looking for late filers
+    assert _store.has_revenue_period("2025-06")
+
+    ensure_period("2025-06", today=dt.date(2025, 8, 2))  # window closed on 08-01
+    ensure_period("2025-06", today=dt.date(2025, 8, 3))
+    ensure_period("2025-06", today=dt.date(2026, 1, 1))
+    assert len(use_mops_fixture) == 5  # one last check, then served from the store
 
 
 def test_unpublished_month_is_never_cached(monkeypatch, mops_unpublished_bytes):
@@ -146,11 +161,12 @@ def test_delisted_company_needs_an_end_within_its_history(
     assert list(tw.revenue("1101", "2025-05", "2025-05")["period"]) == ["2025-05"]
 
 
-def test_fully_synced_month_is_not_downloaded_again(use_mops_fixture):
+def test_synced_month_gets_one_last_check_and_no_more(use_mops_fixture):
     """Everyone filed early and later syncs found nothing new.
 
-    The store holds no row dated after the deadline, yet the month is complete:
-    sync() checked it after the deadline. Queries must not go back to MOPS.
+    The store then holds no row dated after the deadline, which must not leave
+    the month open forever. Once its re-check window has closed, one final
+    comparison settles it and later queries stay off MOPS.
     """
     from twmarket.sync import sync_period
 
@@ -158,8 +174,8 @@ def test_fully_synced_month_is_not_downloaded_again(use_mops_fixture):
     sync_period("2025-06", today=dt.date(2025, 7, 11))  # past the 07-10 deadline, nothing new
     use_mops_fixture.clear()
     for _ in range(3):
-        tw.revenue("2330", "2025-06", "2025-06")
-    assert use_mops_fixture == []
+        tw.revenue("2330", "2025-06", "2025-06")  # long after the window closed
+    assert use_mops_fixture == [(114, 6)]
 
 
 def test_revenue_before_2013_is_rejected_up_front(use_mops_fixture):

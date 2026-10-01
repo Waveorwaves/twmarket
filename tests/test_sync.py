@@ -241,3 +241,16 @@ def test_late_filer_after_a_backfill(fetch_returns, mops_fixture_bytes, without_
     row = appended[appended["ticker"] == "1101"].iloc[0]
     assert row["announce_date"] == dt.date(2025, 8, 15)
     assert not row["announce_date_estimated"]
+
+
+def test_unreadable_check_file_is_ignored_not_fatal(fetch_returns, caplog):
+    """Losing the check dates may cost precision; it must not stop the package."""
+    sync_period("2025-06", today=dt.date(2025, 7, 8))
+    path = _store.data_dir() / "revenue" / "checked.json"
+    path.write_text("{ not json")
+
+    with caplog.at_level("WARNING", logger="twmarket"):
+        appended = sync_period("2025-06", today=dt.date(2025, 7, 9))
+    assert appended.empty
+    assert "unreadable" in caplog.text
+    assert _store.revenue_last_checked("2025-06") == dt.date(2025, 7, 9)  # rewritten cleanly
