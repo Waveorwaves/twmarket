@@ -9,9 +9,13 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import time
 from collections.abc import Callable
 
 ROC_OFFSET = 1911
+
+#: Taiwan has no daylight saving, so a fixed offset is exact and needs no tz database.
+TAIPEI = dt.timezone(dt.timedelta(hours=8), "Asia/Taipei")
 
 # Longest TWSE closure is the Lunar New Year break (~9 calendar days). A roll that
 # runs past this means the trading-day callable is wrong (e.g. a calendar with no
@@ -19,6 +23,16 @@ ROC_OFFSET = 1911
 MAX_ANNOUNCE_ROLL_DAYS = 30
 
 _ROC_DATE_RE = re.compile(r"^\s*(\d{2,3})/(\d{1,2})/(\d{1,2})\s*$")
+
+
+def taipei_today() -> dt.date:
+    """Today's date in Taiwan, whatever timezone this machine is set to.
+
+    Filing deadlines and observed dates are Taiwan dates. The machine's own date
+    lags Taiwan's for part of every day anywhere to the west, and a snapshot
+    stamped with it would claim a figure was knowable a day before it existed.
+    """
+    return dt.datetime.fromtimestamp(time.time(), TAIPEI).date()
 
 
 def roc_year_to_gregorian(roc_year: int) -> int:

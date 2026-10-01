@@ -68,3 +68,15 @@ def test_prices_invalid_ticker():
 def test_prices_start_after_end():
     with pytest.raises(ValueError):
         tw.prices("2330", "2025-07-01", "2025-06-01")
+
+
+def test_prices_rejects_a_non_string_ticker():
+    with pytest.raises(ValueError, match="invalid ticker"):
+        tw.prices(2330, "2025-06-01", "2025-06-30")
+
+
+def test_month_in_progress_is_not_cached(set_taipei_date, use_stock_day_fixture):
+    set_taipei_date(2025, 6, 15)  # June is still trading
+    tw.prices("2330", "2025-06-01", "2025-06-30")
+    tw.prices("2330", "2025-06-01", "2025-06-30")
+    assert use_stock_day_fixture == [("2330", 2025, 6), ("2330", 2025, 6)]

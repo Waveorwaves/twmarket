@@ -27,8 +27,13 @@ import logging
 import pandas as pd
 
 from . import _client, _store
-from ._dates import gregorian_year_to_roc, parse_period
-from .revenue import announce_date_for, parse_bulk_file
+from ._dates import gregorian_year_to_roc, parse_period, taipei_today
+from .revenue import (
+    MIN_SETTLED_ROWS,
+    announce_date_for,
+    check_settled_row_count,
+    parse_bulk_file,
+)
 
 logger = logging.getLogger("twmarket")
 
@@ -46,7 +51,7 @@ def _latest_view(stored: pd.DataFrame) -> pd.DataFrame:
 
 def sync_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
     """Snapshot one period; returns the newly appended observations."""
-    today = today or dt.date.today()
+    today = today or taipei_today()
     year, month = parse_period(period)
     # No error handling on purpose: observations missed today cannot be recovered
     # later, so a failed fetch or an unparseable page must fail the cron job
@@ -57,6 +62,8 @@ def sync_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
         # MOPS's "no data found" page: nobody has filed for this month yet.
         logger.info("%s is not published on MOPS yet — skipped", period)
         return pd.DataFrame()
+    if len(fresh) < MIN_SETTLED_ROWS and today > announce_date_for(period):
+        check_settled_row_count(fresh, period)
 
     stored = _store.load_revenue_period(period)
     if stored is None or stored.empty:
@@ -90,7 +97,7 @@ def sync_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
 
 def run_sync(today: dt.date | None = None) -> pd.DataFrame:
     """Snapshot current + prior month. Returns all newly appended observations."""
-    today = today or dt.date.today()
+    today = today or taipei_today()
     frames = [sync_period(p, today) for p in _current_and_prior_periods(today)]
     frames = [f for f in frames if not f.empty]
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()

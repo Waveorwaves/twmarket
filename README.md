@@ -46,6 +46,8 @@ rev_pit = tw.revenue("2330", "2025-01", "2025-06", as_of="2025-06-05")
 px = tw.prices("2330", "2025-01-01", "2025-06-30")
 #   date, open, high, low, close, volume, turnover
 cal = tw.calendar("2025-01-01", "2025-06-30")  # one `date` column
+tw.is_trading_day("2025-01-28")                # False: Lunar New Year closure
+tw.next_trading_day("2025-01-22")              # datetime.date(2025, 2, 3)
 ```
 
 ```python
@@ -86,16 +88,24 @@ generated at fetch time. So:
 - **Months still being filed are never cached.** A period whose deadline hasn't passed is
   re-fetched on every query, so companies that file late in the window still show up.
   Once the deadline passes, the month is frozen into the store and served from disk.
+- **Every date is a Taiwan date**, whatever timezone your machine is in. A cron job in
+  Chicago or London still stamps observations with the date in Taipei, so a filing never
+  looks like it was knowable the day before it happened.
 - `yoy_pct` / `mom_pct` come from MOPS as published; they may diverge from values you
   compute from stored revenue around mergers and restatements.
 
 ## Error semantics
 
-- Malformed ticker → `ValueError` (all functions)
-- `revenue()`: ticker not found in any month of the requested range → `ValueError` (check
-  for a typo; a delisted or newly listed company needs a range that covers its history).
-  Ticker found, but nothing knowable yet (e.g. `as_of` before the announce date) → empty
-  DataFrame with the correct columns.
+- Malformed ticker → `ValueError` (all functions). Tickers are strings: `"0050"`, not
+  `50` — a number can't carry the leading zero.
+- `revenue()` looks the ticker up in one month first — the latest month of your range
+  whose filing window has closed — so a typo fails after a single request instead of
+  after the whole backfill. Not in that month → `ValueError`. For a **delisted** company,
+  pass an `end` no later than its last month.
+- `revenue()`: ticker found, but nothing knowable yet (e.g. `as_of` before the announce
+  date, or a month it hasn't filed for yet) → empty DataFrame with the correct columns
+  and dtypes.
+- `revenue()`: start after end → `ValueError`.
 - `prices()`: no data in range → empty DataFrame with the correct columns. TWSE answers
   an unknown ticker exactly like a month with no trading, so the two can't be told apart.
 

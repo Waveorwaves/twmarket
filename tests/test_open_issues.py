@@ -36,10 +36,6 @@ def _keep_first_rows(content: bytes, n: int) -> bytes:
 # --- Fixplan P1: unknown ticker costs ~140 fetches ---------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Fixplan P1: get_revenue loops every month before it can reject a bad ticker",
-)
 def test_unknown_ticker_fails_after_one_period_fetch(use_mops_fixture):
     with pytest.raises(ValueError, match="unknown ticker"):
         tw.revenue("9999")  # default range: 2015-01 .. last completed month
@@ -56,10 +52,6 @@ def test_known_ticker_still_gets_the_whole_range(use_mops_fixture):
 # --- Fixplan P2: parse_bulk_file fails open ----------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Fixplan P2: ensure_period stores a settled month even if the file is truncated",
-)
 def test_settled_period_with_implausibly_few_rows_is_rejected(monkeypatch, mops_fixture_bytes):
     partial = _keep_first_rows(mops_fixture_bytes, 40)
     monkeypatch.setattr("twmarket._client.fetch_mops_revenue", lambda y, m: partial)
@@ -77,10 +69,6 @@ def test_open_window_with_few_rows_is_served_not_raised(monkeypatch, mops_fixtur
     assert not _store.has_revenue_period("2025-06")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Fixplan P2: the substring check drops any row containing 合計, incl. a company name",
-)
 def test_company_name_containing_total_marker_is_not_dropped(mops_fixture_bytes):
     baseline = parse_bulk_file(mops_fixture_bytes, "2025-06")
     renamed = mops_fixture_bytes.replace("台泥".encode("big5"), "合計實業".encode("big5"), 1)
@@ -99,9 +87,6 @@ def test_real_total_rows_are_still_excluded(mops_fixture_bytes):
 # --- Fixplan P2 spec conflicts 3 and 4 ---------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True, reason="Fixplan spec-conflict 3: empty revenue() frame has all-object dtypes"
-)
 def test_empty_revenue_frame_has_the_same_dtypes_as_a_full_one(use_mops_fixture):
     full = tw.revenue("2330", "2025-06", "2025-06")
     empty = tw.revenue("2330", "2025-06", "2025-06", as_of="2025-07-09")
@@ -110,9 +95,6 @@ def test_empty_revenue_frame_has_the_same_dtypes_as_a_full_one(use_mops_fixture)
     assert dict(empty.dtypes) == dict(full.dtypes)
 
 
-@pytest.mark.xfail(
-    strict=True, reason="Fixplan spec-conflict 4: is_trading_day/next_trading_day not exported"
-)
 def test_calendar_helpers_are_reachable_from_the_package(monkeypatch):
     assert callable(tw.is_trading_day)
     assert callable(tw.next_trading_day)
@@ -129,10 +111,6 @@ def test_calendar_function_is_not_shadowed_by_its_module():
 # --- REVIEW: found while reading the code, not in Fixplan.md -----------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="REVIEW: ensure_month caches any month != the current one, including future months",
-)
 def test_future_price_months_are_not_frozen_as_empty():
     """An empty answer for a month that has not happened is not data.
 
@@ -144,20 +122,12 @@ def test_future_price_months_are_not_frozen_as_empty():
     assert _store.load_prices_month("2330_2099-01") is None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="REVIEW: an inverted revenue range is reported as 'unknown ticker'",
-)
 def test_inverted_revenue_range_is_reported_as_such(use_mops_fixture):
     with pytest.raises(ValueError, match=r"(?i)start|after|before|order|range"):
         tw.revenue("2330", "2025-06", "2025-01")
     assert use_mops_fixture == []  # and nothing should be fetched to find that out
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="REVIEW: revenue() accepts an int ticker, then never matches it and blames the ticker",
-)
 def test_integer_ticker_is_handled_deliberately(use_mops_fixture):
     try:
         df = tw.revenue(2330, "2025-06", "2025-06")
@@ -184,10 +154,6 @@ def utc_machine_at_1730_on_deadline_day(monkeypatch):
     time.tzset()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="REVIEW: sync() dates rows with the machine's local date, not Asia/Taipei",
-)
 def test_sync_uses_the_taipei_date_not_the_machine_date(
     utc_machine_at_1730_on_deadline_day, monkeypatch, mops_fixture_bytes
 ):

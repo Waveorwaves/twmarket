@@ -14,6 +14,7 @@ from ._dates import (
     gregorian_year_to_roc,
     parse_period,
     statutory_deadline,
+    taipei_today,
 )
 from .calendar import REFERENCE_TICKERS, trading_days
 
@@ -26,10 +27,22 @@ BACKFILL_START = "2015-01"
 #: 10 + 14 stays inside the same month, so this costs one cached price-month.
 ANNOUNCE_ROLL_WINDOW_DAYS = 14
 
+#: Fewest rows a month may have once its filing window has closed. TWSE lists
+#: roughly a thousand companies (990 in the 2025-06 file), so a settled file with
+#: fewer than half that is a truncated or re-laid-out page, not a quiet month.
+MIN_SETTLED_ROWS = 500
+
+OUTPUT_COLUMNS = [
+    "ticker", "period", "revenue_twd", "yoy_pct", "mom_pct",
+    "announce_date", "announce_date_estimated", "is_restated",
+]  # fmt: skip
+
 _TICKER_RE = re.compile(r"^\d{4,6}$")
 
-# Data rows are <tr align=right> with 11 <td> cells; industry-total (合計) rows use
-# <th> cells inside the same <tr> pattern and are skipped by requiring an all-<td> row.
+# Data rows are <tr align=right> with 11 <td> cells whose first cell is a ticker.
+# Industry-total (合計) rows share the <tr> pattern but have no ticker cell, which is
+# what excludes them — matching on the text 合計 would also drop a company whose
+# name happens to contain it.
 _ROW_RE = re.compile(r"<tr align=right>(.*?)</tr>", re.I | re.S)
 _CELL_RE = re.compile(r"<td[^>]*>(.*?)</td>", re.I | re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -64,8 +77,6 @@ def parse_bulk_file(content: bytes, period: str) -> pd.DataFrame:
     text = content.decode("big5", errors="replace")
     records = []
     for row in _ROW_RE.findall(text):
-        if "合計" in row:
-            continue
         cells = [_clean(c) for c in _CELL_RE.findall(row)]
         if len(cells) != 11 or not re.fullmatch(r"\d{4,6}", cells[0]):
             continue
@@ -92,6 +103,20 @@ def parse_bulk_file(content: bytes, period: str) -> pd.DataFrame:
     return df
 
 
+def check_settled_row_count(df: pd.DataFrame, period: str) -> None:
+    """Refuse a month that is past its deadline yet implausibly thin.
+
+    Only for settled periods: while the filing window is open a short file is
+    normal, because most companies have not filed yet.
+    """
+    if len(df) < MIN_SETTLED_ROWS:
+        raise ValueError(
+            f"MOPS bulk file for {period} has only {len(df)} rows after its filing "
+            f"deadline (expected at least {MIN_SETTLED_ROWS}) — the page is truncated or "
+            "its layout changed; nothing was stored"
+        )
+
+
 def _month_range(start: str, end: str) -> list[str]:
     (y0, m0), (y1, m1) = parse_period(start), parse_period(end)
     months = []
@@ -103,7 +128,7 @@ def _month_range(start: str, end: str) -> list[str]:
 
 
 def _last_completed_period(today: dt.date | None = None) -> str:
-    today = today or dt.date.today()
+    today = today or taipei_today()
     y, m = (today.year - 1, 12) if today.month == 1 else (today.year, today.month - 1)
     return f"{y:04d}-{m:02d}"
 
@@ -172,7 +197,7 @@ def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
     were all observed while the window was open is topped up through the differ,
     which appends late filers without duplicating what is already held.
     """
-    today = today or dt.date.today()
+    today = today or taipei_today()
     stored = _store.load_revenue_period(period)
     if stored is not None and not stored.empty:
         if _is_settled(stored, period):
@@ -198,6 +223,7 @@ def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
     df = _store.normalize_revenue(df)
 
     if today > announce:
+        check_settled_row_count(df, period)
         _store.append_revenue_observations(period, df)
     else:
         logger.info(
@@ -206,6 +232,27 @@ def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
             announce,
         )
     return df
+
+
+def _probe_order(periods: list[str], today: dt.date) -> list[tuple[str, bool]]:
+    """Months to look a ticker up in, as (period, settled), most conclusive first.
+
+    A settled month — its filing window has closed — is complete, so a listed
+    company is certain to be in it. Those come first, latest first. Months still
+    being filed follow: finding the ticker there proves it exists, but not
+    finding it proves nothing.
+    """
+    open_window = []
+    last = len(periods) - 1
+    while last >= 0:
+        period = periods[last]
+        # The deadline itself is a cheap lower bound; only ask the calendar for
+        # the rolled date once that has passed.
+        if today > statutory_deadline(period) and today > announce_date_for(period):
+            break
+        open_window.append((period, False))
+        last -= 1
+    return [(p, True) for p in reversed(periods[: last + 1])] + open_window
 
 
 def get_revenue(
@@ -217,33 +264,48 @@ def get_revenue(
     """Monthly revenue for one ticker, latest view or point-in-time (`as_of`).
 
     Reads the local store and fetches any missing months in the range
-    (rate-limited). Default range is BACKFILL_START through the last
-    completed month.
+    (rate-limited: about one request per uncached month, at least 1s apart).
+    Default range is BACKFILL_START through the last completed month.
+
+    The ticker is looked up in one month first — the latest settled month of the
+    range — so a mistyped ticker fails after a single fetch instead of after the
+    whole backfill. A company that is not in that month raises ValueError even
+    if it appears earlier in the range; for a delisted company pass an `end` no
+    later than its last month.
     """
-    if not _TICKER_RE.fullmatch(str(ticker)):
-        raise ValueError(f"invalid ticker: {ticker!r}")
+    # Strings only: an int cannot carry a leading zero (0050 would arrive as 50).
+    if not isinstance(ticker, str) or not _TICKER_RE.fullmatch(ticker):
+        raise ValueError(f"invalid ticker: {ticker!r} (pass a string of 4-6 digits, e.g. '2330')")
     start, end = start or BACKFILL_START, end or _last_completed_period()
     as_of_date = dt.date.fromisoformat(as_of) if as_of else None
+    periods = _month_range(start, end)
+    if not periods:
+        raise ValueError(f"start {start} is after end {end}")
 
-    frames, seen_anywhere = [], False
-    for period in _month_range(start, end):
-        df = ensure_period(period)
-        if df is None or df.empty:
-            continue
-        seen_anywhere = seen_anywhere or (df["ticker"] == ticker).any()
+    today = taipei_today()
+    loaded: dict[str, pd.DataFrame] = {}
+    for period, settled in _probe_order(periods, today):
+        df = loaded[period] = ensure_period(period, today)
+        if (df["ticker"] == ticker).any():
+            break
+        if settled and not df.empty:
+            raise ValueError(
+                f"unknown ticker: {ticker!r} is not in MOPS's {period} file, the latest "
+                "settled month of the requested range. Check for a typo. For a delisted "
+                "company pass an `end` no later than its last month; for a newly listed "
+                "one pass a range that starts at its first month."
+            )
+        # Unpublished, or still being filed: absence here proves nothing.
+
+    frames = []
+    for period in periods:
+        df = loaded[period] if period in loaded else ensure_period(period, today)
         frames.append(df[df["ticker"] == ticker])
 
-    columns = [
-        "ticker", "period", "revenue_twd", "yoy_pct", "mom_pct",
-        "announce_date", "announce_date_estimated", "is_restated",
-    ]  # fmt: skip
-    if not seen_anywhere:
-        raise ValueError(f"unknown ticker: {ticker!r} (not found in any fetched month)")
     obs = pd.concat(frames, ignore_index=True)
     if as_of_date is not None:
         obs = obs[obs["announce_date"] <= as_of_date]
-    if obs.empty:
-        return pd.DataFrame(columns=columns)
-    # Latest observation per period (append order = observation order within a period)
+    # Latest observation per period (append order = observation order within a period).
+    # An empty result goes through the same steps, so it keeps the stored dtypes.
     obs = obs.groupby("period", as_index=False).tail(1)
-    return obs.sort_values("period")[columns].reset_index(drop=True)
+    return obs.sort_values("period")[OUTPUT_COLUMNS].reset_index(drop=True)

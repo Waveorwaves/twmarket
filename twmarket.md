@@ -94,17 +94,22 @@ tw.sync()                                # snapshot job: capture announce dates/
 Revenue columns: `ticker, period (YYYY-MM), revenue_twd, yoy_pct, mom_pct, announce_date,
 announce_date_estimated, is_restated`. Prices: `date, open, high, low, close, volume, turnover`.
 
-**Error semantics:** malformed ticker → `ValueError` everywhere. `revenue()`: ticker
-absent from every month in the range → `ValueError` (it may be a typo, delisted, or not
-yet listed — the message says so and suggests an explicit range); ticker present in the
-range but no rows survive the query (e.g. `as_of` before any announce date) → empty
-DataFrame with correct dtypes. `prices()`: no data in range → empty DataFrame with
+**Error semantics:** malformed ticker → `ValueError` everywhere; tickers are strings
+(`"0050"`, never an int, which cannot carry the leading zero). `revenue()`: ticker absent
+from the latest *settled* month of the range → `ValueError` (it may be a typo, delisted,
+or not yet listed — the message says so and how to adjust the range); a month that is
+unpublished or still being filed is never evidence of absence; ticker known but no rows
+survive the query (e.g. `as_of` before any announce date) → empty DataFrame with correct
+dtypes; start after end → `ValueError`. `prices()`: no data in range → empty DataFrame with
 correct dtypes (TWSE returns the same response for an unknown ticker as for an empty
 month, so `prices()` cannot raise on unknown tickers).
 *(Amended 2026-09-28; originally "valid ticker with no data in range → empty DataFrame".
 Without a listings registry — out of scope — "never existed" and "not listed yet" look
 identical, and raising makes a typo that lands on a nonexistent code, like `23300` for
-`2330`, fail loudly instead of looking like an empty history.)*
+`2330`, fail loudly instead of looking like an empty history. Amended again 2026-10-01:
+the check uses one month — the latest settled one — so a typo costs a single request, not
+the whole backfill. The price is that a delisted company must be queried with an `end`
+inside its history.)*
 
 ## 6. Build steps (each = one sitting, commit after each)
 

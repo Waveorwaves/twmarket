@@ -10,6 +10,7 @@ venv/
 # Tooling
 .pytest_cache/
 .ruff_cache/
+.coverage
 
 # OS
 .DS_Store

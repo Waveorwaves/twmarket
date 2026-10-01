@@ -5,11 +5,13 @@ Public API:
     prices()    Daily OHLCV from TWSE (unadjusted raw exchange data)
     calendar()  Trading days derived from price history
     sync()      Snapshot job: capture observed announce dates and restatements
+
+    is_trading_day(), next_trading_day()   Single-date lookups on that calendar
 """
 
 __version__ = "0.1.0"
 
-__all__ = ["revenue", "prices", "calendar", "sync"]
+__all__ = ["revenue", "prices", "calendar", "sync", "is_trading_day", "next_trading_day"]
 
 # Import submodules first so the public functions defined below shadow the
 # module objects on the package (import twmarket.revenue would otherwise
@@ -19,14 +21,20 @@ from . import prices as _prices_mod  # noqa: E402
 from . import revenue as _revenue_mod  # noqa: E402
 from . import sync as _sync_mod  # noqa: E402
 
+# `twmarket.calendar` is the function below, so these cannot be reached through it.
+from .calendar import is_trading_day, next_trading_day  # noqa: E402
+
 
 def revenue(ticker, start=None, end=None, as_of=None):
     """Monthly revenue for a TWSE-listed ticker.
 
     Args:
-        ticker: e.g. "2330". Invalid tickers raise ValueError.
+        ticker: a string such as "2330". A malformed ticker raises ValueError,
+            and so does one that is not in the latest settled month of the range
+            (a typo, or a delisted company queried past its last month).
         start, end: period range as "YYYY-MM" (inclusive). Defaults to full
-            history (2015-01 through last completed month).
+            history (2015-01 through last completed month). A cold cache costs
+            about one request per month of history, at least 1s apart.
         as_of: ISO date; return only figures knowable on that date
             (point-in-time view based on announce_date).
 
@@ -40,7 +48,7 @@ def prices(ticker, start, end):
     """Daily OHLCV for a TWSE-listed ticker (unadjusted raw exchange data).
 
     Args:
-        ticker: e.g. "2330". Invalid tickers raise ValueError.
+        ticker: a string such as "2330". A malformed ticker raises ValueError.
         start, end: ISO dates (inclusive), e.g. "2025-01-01".
 
     Returns a DataFrame with columns: date, open, high, low, close,

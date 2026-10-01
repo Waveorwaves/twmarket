@@ -1,7 +1,11 @@
+import datetime as dt
 import json
+import time
 from pathlib import Path
 
 import pytest
+
+from twmarket._dates import TAIPEI
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -62,3 +66,46 @@ def use_mops_fixture(monkeypatch, mops_fixture_bytes):
 
     monkeypatch.setattr("twmarket._client.fetch_mops_revenue", _fake)
     return calls
+
+
+@pytest.fixture
+def set_taipei_date(monkeypatch):
+    """Freeze the clock at noon Taiwan time on the given date."""
+
+    def _set(year, month, day):
+        instant = dt.datetime(year, month, day, 12, tzinfo=TAIPEI).timestamp()
+        monkeypatch.setattr(time, "time", lambda: instant)
+
+    return _set
+
+
+ROW_TAG = b"<tr align=right>"
+
+
+@pytest.fixture
+def first_rows(mops_fixture_bytes):
+    """The recorded bulk file cut after its first `n` data rows (a thin month)."""
+
+    def _cut(n):
+        pos = -1
+        for _ in range(n + 1):
+            pos = mops_fixture_bytes.find(ROW_TAG, pos + 1)
+        assert pos > 0, "fixture has fewer rows than requested"
+        return mops_fixture_bytes[:pos]
+
+    return _cut
+
+
+@pytest.fixture
+def without_ticker(mops_fixture_bytes):
+    """The recorded bulk file with one company's row removed (as after a delisting)."""
+
+    def _drop(ticker):
+        cell = f">{ticker}<".encode()
+        assert mops_fixture_bytes.count(cell) == 1
+        at = mops_fixture_bytes.find(cell)
+        start = mops_fixture_bytes.rfind(ROW_TAG, 0, at)
+        end = mops_fixture_bytes.find(b"</tr>", at) + len(b"</tr>")
+        return mops_fixture_bytes[:start] + mops_fixture_bytes[end:]
+
+    return _drop

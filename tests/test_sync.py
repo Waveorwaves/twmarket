@@ -185,3 +185,14 @@ def test_revenue_top_up_does_not_hide_fetch_failures(fetch_returns, monkeypatch)
     monkeypatch.setattr("twmarket._client.fetch_mops_revenue", down)
     with pytest.raises(requests.ConnectionError):
         tw.revenue("2330", "2025-06", "2025-06")
+
+
+def test_sync_rejects_a_thin_month_only_after_its_deadline(fetch_returns, first_rows):
+    """The row floor guards sync() too: a cold sync must not freeze a truncated month."""
+    fetch_returns["content"] = first_rows(40)  # 38 companies and 2 industry totals
+    with pytest.raises(ValueError, match="only 38 rows"):
+        sync_period("2025-06", today=dt.date(2025, 8, 1))  # deadline was 07-10
+    assert not _store.has_revenue_period("2025-06")
+
+    appended = sync_period("2025-06", today=dt.date(2025, 7, 3))  # window still open
+    assert len(appended) == 38

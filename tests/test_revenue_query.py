@@ -96,3 +96,51 @@ def test_unpublished_month_in_range_leaves_the_rest(
     monkeypatch.setattr("twmarket._client.fetch_mops_revenue", lambda y, m: pages[(y, m)])
     df = tw.revenue("2330", "2025-06", "2025-07")
     assert list(df["period"]) == ["2025-06"]
+
+
+def test_unknown_ticker_costs_one_fetch_even_early_in_the_month(set_taipei_date, use_mops_fixture):
+    """Before the 10th the last completed month is still being filed.
+
+    The lookup has to skip it and use the latest *settled* month, or a typo
+    would cost two fetches and a real company that has not filed yet would be
+    called unknown.
+    """
+    set_taipei_date(2026, 10, 5)  # September's window is open; August is settled
+    with pytest.raises(ValueError, match="unknown ticker.*2026-08"):
+        tw.revenue("9999")
+    assert use_mops_fixture == [(115, 8)]
+
+
+def test_missing_from_an_open_window_month_is_not_an_error(
+    set_taipei_date, monkeypatch, first_rows
+):
+    """While a month is being filed, a company not in it yet has simply not filed."""
+    set_taipei_date(2025, 7, 3)  # June's deadline is 07-10
+    thin = first_rows(40)
+    monkeypatch.setattr("twmarket._client.fetch_mops_revenue", lambda y, m: thin)
+    assert tw.revenue("2330", "2025-06", "2025-06").empty  # not among the first 40 filers
+    assert len(tw.revenue("1101", "2025-06", "2025-06")) == 1  # one that has filed
+
+
+def test_range_of_unpublished_months_is_empty_not_an_error(monkeypatch, mops_unpublished_bytes):
+    monkeypatch.setattr("twmarket._client.fetch_mops_revenue", lambda y, m: mops_unpublished_bytes)
+    df = tw.revenue("2330", "2099-01", "2099-02")
+    assert df.empty
+    assert list(df.columns) == [
+        "ticker", "period", "revenue_twd", "yoy_pct", "mom_pct",
+        "announce_date", "announce_date_estimated", "is_restated",
+    ]  # fmt: skip
+
+
+def test_delisted_company_needs_an_end_within_its_history(
+    monkeypatch, mops_fixture_bytes, without_ticker
+):
+    """The one-month lookup trades this away: gone from the latest month = unknown.
+
+    The error has to say how to get the data, and following it has to work.
+    """
+    pages = {(114, 5): mops_fixture_bytes, (114, 6): without_ticker("1101")}
+    monkeypatch.setattr("twmarket._client.fetch_mops_revenue", lambda y, m: pages[(y, m)])
+    with pytest.raises(ValueError, match="delisted.*`end`"):
+        tw.revenue("1101", "2025-05", "2025-06")
+    assert list(tw.revenue("1101", "2025-05", "2025-05")["period"]) == ["2025-05"]

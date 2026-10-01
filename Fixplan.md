@@ -1,6 +1,6 @@
 # twmarket — v0.1.1 Fix Plan
 
-Written 2026-08-19. **Updated 2026-09-28** with status and decisions (see below).
+Written 2026-08-19. **Updated 2026-10-01** with status and decisions (see below).
 Execution target: Claude Code, working in the `twmarket` repo.
 
 Findings come from a review of the shipped v0.1.0 tree: 37 tests pass, `ruff check`
@@ -12,19 +12,24 @@ Every fix lands with a test that fails before it and passes after.
 
 ---
 
-## Status — 2026-09-28
+## Status — 2026-10-01
+
+**All code work for v0.1.1 is done.** What remains is release hygiene (P3): changelog,
+version bump, tags, and the PyPI publish.
 
 | Item | Status |
 | --- | --- |
 | P0 — `sync()` false announce dates | ✅ Done, `e71a6f5` |
-| P1 — silent failure in `sync_period` | ✅ Done 2026-09-28 (not yet committed) |
-| P1 — unknown ticker costs ~140 fetches | **Open — do next** |
-| P2 — coverage gaps | Open (figures below are stale; re-measure first) |
-| P2 — `parse_bulk_file` fails open | Half done: zero-row parses raise. Row floor and 合計 cleanup open |
-| P2 — spec conflicts with `twmarket.md` | 1–2 decided, spec amended; 3–4 open (code fixes) |
-| P3 — repository hygiene | Partial; history decision made (leave as is) |
+| P1 — silent failure in `sync_period` | ✅ Done, `eda3719` |
+| P1 — unknown ticker costs ~140 fetches | ✅ Done 2026-10-01 |
+| P2 — coverage gaps | ✅ Done: 98%, CI gate at 90% |
+| P2 — `parse_bulk_file` fails open | ✅ Done: zero-row raise, row floor, 合計 check removed |
+| P2 — spec conflicts with `twmarket.md` | ✅ All four resolved |
+| Review 2026-09-29 — four further defects | ✅ Done 2026-10-01 (see "Independent review") |
+| P3 — repository hygiene | **Open — next.** History decision made (leave as is) |
 
-Current tree: 58 tests pass, `ruff check` clean.
+Current tree: 117 tests pass on Python 3.12 / pandas 3 and Python 3.10 / pandas 2.3 (the
+CI matrix), `ruff check` clean, 98% coverage.
 
 ## Decisions
 
@@ -42,6 +47,10 @@ Current tree: 58 tests pass, `ruff check` clean.
   the Step 0–8 commit messages. They are plain text, not `Co-authored-by:` trailers, so
   GitHub does not list Devin as a contributor; removing them would need a force-push to
   published `main` for no functional gain (P3.1).
+- **2026-10-01 — debug and ship, no new features.** v0.1.1 fixes every known defect,
+  goes to PyPI with the README as its documentation, and development stops there. The
+  only additions to the public surface are the two calendar helpers that Step 7 already
+  promised (`is_trading_day`, `next_trading_day`), now reachable from the package.
 
 ---
 
@@ -85,7 +94,7 @@ Not done from P0's docs list: `docs/api.md` belonged to the docs site, now defer
 
 ---
 
-## P1 — Silent failure in the snapshot job — ✅ DONE (2026-09-28, uncommitted)
+## P1 — Silent failure in the snapshot job — ✅ DONE (`eda3719`, 2026-09-28)
 
 **The problem.** `sync_period` wrapped its fetch in `except Exception: return
 pd.DataFrame()`, commented as "current month's file may not exist yet". Since `e71a6f5`
@@ -122,7 +131,7 @@ the user to ignore warnings. Propagating real errors is the protection that matt
 
 ---
 
-## P1 — `revenue()` fetches ~140 months before it can reject a bad ticker
+## P1 — `revenue()` fetches ~140 months before it can reject a bad ticker — ✅ DONE (2026-10-01)
 
 `get_revenue` defaults to `BACKFILL_START` (2015-01) through last completed month and
 loops `ensure_period` over every month. At the client's ≥1s spacing that is roughly
@@ -154,12 +163,28 @@ Keep the `BACKFILL_START` default as-is. Do not add a progress bar dependency.
 called once); a known ticker still returns the full range; a ticker absent only from an
 unsettled month does not raise.
 
+**What landed (2026-10-01).** `get_revenue` looks the ticker up in the latest settled
+month of the range and raises there. Months that cannot answer the question are skipped
+rather than trusted: an unpublished month, and a month still being filed, are never
+evidence of absence. Live check against MOPS: cold-cache `tw.revenue("9999")` made one
+request and raised in 3.5s.
+
+Known cost, documented in the README and the error message: a company absent from the
+latest settled month raises even if it appears earlier in the range, so a **delisted**
+company must be queried with an `end` inside its history. A range holding only
+unpublished months returns an empty frame instead of raising.
+
 ---
 
-## P2 — Coverage gaps sit exactly where risk is highest
+## P2 — Coverage gaps sit exactly where risk is highest — ✅ DONE (2026-10-01)
 
-Measured on v0.1.0: `_client.py` 43%, `sync.py` 77%, overall 86%. **Stale** — re-measure
-on the current tree before starting.
+Measured on v0.1.0: `_client.py` 43%, `sync.py` 77%, overall 86%.
+
+**Now:** 98% overall; `_client.py`, `revenue.py` and `sync.py` at 100%. The reviewer's
+`tests/test_client.py` covers retry, backoff and throttle against a local HTTP server.
+`pytest-cov` is in the `dev` extra and CI runs `pytest --cov=twmarket
+--cov-fail-under=90`. The workflow's actions were also moved to `checkout@v7` and
+`setup-python@v7`; GitHub had flagged the old ones as deprecated.
 
 `_client.py` holds the retry, backoff, and throttle logic — the layer most likely to
 misbehave against a rate-limiting government site — and is almost entirely untested.
@@ -176,7 +201,7 @@ misbehave against a rate-limiting government site — and is almost entirely unt
 
 ---
 
-## P2 — `parse_bulk_file` fails open on MOPS layout changes
+## P2 — `parse_bulk_file` fails open on MOPS layout changes — ✅ DONE (2026-10-01)
 
 Two brittle points, both silent:
 
@@ -209,9 +234,14 @@ The gap is permanent and invisible.
   the substring check (it contains 34 合計 rows, all already rejected by the ticker
   guard). Safe to remove.
 
-**Test:** ✅ a truncated fixture raises rather than silently storing zero rows (done).
-Still to add with the row floor: a pre-deadline fetch with few rows is served without
-raising.
+**Test:** ✅ a truncated fixture raises rather than silently storing zero rows; a
+pre-deadline fetch with few rows is served without raising.
+
+**What landed (2026-10-01).** `MIN_SETTLED_ROWS = 500`, enforced by
+`check_settled_row_count` in both places a settled month can be written:
+`ensure_period`, and `sync_period` (a cold sync after the deadline would otherwise freeze
+a truncated month). The `"合計" in row` substring check is gone; the ticker-cell guard
+alone excludes totals, and a company named 合計實業 now parses.
 
 ---
 
@@ -238,14 +268,43 @@ the spec; items 3–4 are code fixes.
    "published". Computing yoy needs the same month a year earlier in the store, which a
    2015-01 backfill start doesn't have for 2015, and restatement-consistent
    recomputation is v0.2 material. No code change.
-3. **Empty `revenue()` frames have all-`object` dtypes.** §5 requires correct dtypes.
+3. **Empty `revenue()` frames have all-`object` dtypes — ✅ fixed 2026-10-01** (an empty
+   result now goes through the same steps as a full one, so the dtypes match on both
+   pandas 2 and 3). §5 requires correct dtypes.
    No decision needed: build the empty frame from `_store.REVENUE_COLUMNS`, as
    `prices._empty()` does. Test: dtypes of an `as_of`-before-announce result.
-4. **Calendar helpers are unreachable as attributes.** `tw.calendar` is the function,
+4. **Calendar helpers are unreachable as attributes — ✅ fixed 2026-10-01**
+   (`tw.is_trading_day`, `tw.next_trading_day`). `tw.calendar` is the function,
    so `tw.calendar.is_trading_day` raises `AttributeError`; only
    `from twmarket.calendar import is_trading_day` works. Build Step 7 promised both
    helpers. Fix by exporting `is_trading_day` and `next_trading_day` at package level —
    an addition to the public API, not a rename.
+
+---
+
+## Independent review — 2026-09-29 (all fixed 2026-10-01)
+
+A separate session reviewed `e71a6f5` plus the P1 fix and wrote `tests/test_client.py`,
+`tests/test_contract.py` and `tests/test_open_issues.py`. It confirmed the point-in-time
+core by sweeps and mutation testing, and did the spec §7 spot-checks independently of the
+parser's author: revenue for 2330 (2024-03, 2025-01, 2025-12) matches the raw MOPS pages,
+and five closes match TWSE's `MI_INDEX`, a different endpoint from the one the package
+uses. It also found four defects that were not in this plan:
+
+1. **`sync()` used the machine's date, not Taiwan's.** A cron in a timezone west of
+   Taiwan stamps a filing with the previous day — one day of lookahead. Fixed with
+   `_dates.taipei_today()` (a fixed UTC+8 offset; Taiwan has no DST), used at every
+   former `date.today()`.
+2. **Future price months were cached as empty**, which would leave that month with no
+   trading calendar once it arrived. `ensure_month` now caches only months that are over.
+3. **An inverted `revenue()` range** was reported as "unknown ticker". It now raises
+   "start … is after end …" without fetching.
+4. **`revenue(2330)` (an int)** passed validation, never matched, and blamed the ticker
+   after a full backfill. `revenue()` and `prices()` now accept strings only.
+
+Each had a strict-xfail test; the markers were deleted with the fixes. Remaining manual
+items from the review, all for the repo owner: configure PyPI trusted publishing, set the
+GitHub repo description and topics, and read the README once as a first-time user.
 
 ---
 
@@ -314,13 +373,14 @@ The v0.2 parking lot exists. Use it.
 - [x] `README.md` describes the corrected three-case PIT semantics
 - [x] Network and HTTP errors propagate from `sync()` and `revenue()` instead of
       returning empty; only MOPS's `查無資料` page reads as "not published" (2026-09-28)
-- [ ] Unknown ticker raises after one period fetch, not ~140
+- [x] Unknown ticker raises after one period fetch, not ~140 (2026-10-01)
 - [x] `parse_bulk_file` raises on a zero-row parse that is not the `查無資料` page
       (2026-09-28)
-- [ ] Row-count floor applied when caching a settled period
-- [ ] Coverage ≥90%, CI enforces it
+- [x] Row-count floor applied when caching a settled period (2026-10-01)
+- [x] Coverage ≥90%, CI enforces it (98% on 2026-10-01)
 - [x] Spec conflicts 1–2 decided and `twmarket.md` amended to match (2026-09-28)
-- [ ] Spec conflicts 3–4 fixed in code (empty-frame dtypes; calendar helpers exported)
+- [x] Spec conflicts 3–4 fixed in code (empty-frame dtypes; calendar helpers exported)
+- [x] The four defects from the 2026-09-29 review fixed (2026-10-01)
 - [x] History decision made: leave as is (2026-09-28)
 - [ ] `v0.1.0` and `v0.1.1` tagged
 - [ ] `v0.1.1` published to PyPI by trusted publishing from the tag; README install line

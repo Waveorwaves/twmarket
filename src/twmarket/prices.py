@@ -8,7 +8,7 @@ import re
 import pandas as pd
 
 from . import _client, _store
-from ._dates import parse_roc_date
+from ._dates import parse_roc_date, taipei_today
 
 _TICKER_RE = re.compile(r"^\d{4,6}$")
 
@@ -81,16 +81,20 @@ def ensure_month(ticker: str, year: int, month: int) -> pd.DataFrame:
     # doesn't distinguish, so both yield an empty month (format validation of
     # tickers happens in get_prices).
     df = parse_stock_day(payload, ticker)
-    today = dt.date.today()
-    if (year, month) != (today.year, today.month):  # don't freeze a partial month
+    today = taipei_today()
+    # Only a month that is over is final. The current month is still filling in,
+    # and an empty answer for a future month is not data: frozen, it would leave
+    # that month without a trading calendar once it arrives.
+    if (year, month) < (today.year, today.month):
         _store.save_prices_month(key, df)
     return df
 
 
 def get_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
     """Daily OHLCV for one ticker between two ISO dates (inclusive)."""
-    if not _TICKER_RE.fullmatch(str(ticker)):
-        raise ValueError(f"invalid ticker: {ticker!r}")
+    # Strings only: an int cannot carry a leading zero (0050 would arrive as 50).
+    if not isinstance(ticker, str) or not _TICKER_RE.fullmatch(ticker):
+        raise ValueError(f"invalid ticker: {ticker!r} (pass a string of 4-6 digits, e.g. '2330')")
     start_d, end_d = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
     if start_d > end_d:
         raise ValueError(f"start {start} is after end {end}")
