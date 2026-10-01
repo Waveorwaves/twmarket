@@ -7,10 +7,14 @@ became knowable, which is only the same thing when we were watching in time:
 
 - First sighting on or before the statutory deadline -> a genuine catch:
   announce_date = today, estimated=False. This is the point of sync().
-- First sighting after the deadline -> the filing already happened at an unknown
-  earlier date and MOPS preserves no timestamp, so fall back to the deadline
-  estimate: announce_date = estimated deadline, estimated=True. Claiming today
-  here would date the figure *later* than reality and call it authoritative.
+- First sighting after the deadline, with no earlier check on or after the
+  deadline -> the filing already happened at an unknown earlier date and MOPS
+  preserves no timestamp, so fall back to the deadline estimate: announce_date =
+  estimated deadline, estimated=True. Claiming today here would date the figure
+  *later* than reality and call it authoritative.
+- First sighting after the deadline, when an earlier check on or after the
+  deadline did not have it -> a late filing, caught: announce_date = today,
+  estimated=False. The deadline estimate would be *earlier* than the filing.
 - Changed revenue vs the latest stored observation -> restatement: a NEW row with
   is_restated=True, announce_date = today (we watched the value change, so that
   is the date it became knowable). The original row is never discarded.
@@ -32,6 +36,7 @@ from .revenue import (
     MIN_SETTLED_ROWS,
     announce_date_for,
     check_settled_row_count,
+    last_checked,
     parse_bulk_file,
 )
 
@@ -66,6 +71,7 @@ def sync_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
         check_settled_row_count(fresh, period)
 
     stored = _store.load_revenue_period(period)
+    previous_check = last_checked(period, stored)
     if stored is None or stored.empty:
         latest = pd.DataFrame(columns=["ticker", "revenue_twd"])
     else:
@@ -82,16 +88,23 @@ def sync_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
     )
     new_obs = merged[is_new | merged["is_restated"]].drop(columns=["revenue_twd_stored"]).copy()
     if new_obs.empty:
+        # Nothing changed, but the comparison itself is worth recording: it is
+        # what lets a later arrival be recognised as late.
+        _store.mark_revenue_checked(period, today)
         return pd.DataFrame()
 
-    # A first sighting after the deadline cannot be dated; only a restatement is
-    # observed as it happens regardless of when the period's deadline was.
+    # A first sighting after the deadline cannot be dated — unless an earlier
+    # check, itself on or after the deadline, did not have the row. Then it
+    # arrived late and today is when it became knowable. A restatement is always
+    # observed as it happens.
     deadline = announce_date_for(period)
-    undatable = (today > deadline) & ~new_obs["is_restated"]
+    watched_since_deadline = previous_check is not None and previous_check >= deadline
+    undatable = (today > deadline and not watched_since_deadline) & ~new_obs["is_restated"]
     new_obs["announce_date"] = [deadline if late else today for late in undatable]
     new_obs["announce_date_estimated"] = undatable.to_numpy()
     new_obs["observed_date"] = today
     _store.append_revenue_observations(period, new_obs)
+    _store.mark_revenue_checked(period, today)
     return new_obs.reset_index(drop=True)
 
 

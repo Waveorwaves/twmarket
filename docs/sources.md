@@ -21,6 +21,15 @@ Verified against live endpoints on 2026-08-12; calendar reference fixtures added
 - **`出表日期` (report date) is fetch-time**, not a filing date. Fixture fetched
   2026-08-12 shows `出表日期：115/08/10` on a June-2025 data file. This confirms the
   point-in-time design in the spec: bulk files preserve no historical announce dates.
+- **Layout history** (checked live 2026-10-01):
+  - **2013-02 onward:** the 11-cell row described above.
+  - **2013-01:** same 11 cells, but `不適用` ("not applicable") in the prior-month and
+    month-on-month cells. It was the first month of IFRS consolidated reporting, and the
+    page says so: no December 2012 consolidated figure exists to compare with. Parsed as
+    missing.
+  - **2012-12 and earlier:** 10 cells (no remarks column), and the figures predate the
+    move to IFRS consolidated revenue, so they are not comparable with later months.
+    **Not supported:** `revenue()` rejects a `start` before `2013-01`.
 - **Unpublished month (nobody has filed yet):** **HTTP 200, not 404** — a ~900-byte
   page with the table title and `查無資料` ("no data found"). Checked 2026-09-28 for the
   current month (115/9) and a future one (115/12). `parse_bulk_file` returns an empty
@@ -28,7 +37,9 @@ Verified against live endpoints on 2026-08-12; calendar reference fixtures added
   means the layout changed. A 404 is therefore never "not published" — it would mean the
   URL scheme changed.
 - **Fixtures:** `tests/fixtures/t21sc03_114_6_0.html` (June 2025, ~449 KB, raw Big5
-  bytes); `t21sc03_115_9_0_unpublished.html` (the real 查無資料 page, 916 bytes)
+  bytes); `t21sc03_115_9_0_unpublished.html` (the real 查無資料 page, 916 bytes);
+  `t21sc03_102_1_0_head.html` (January 2013 cut after its first 40 rows — the `不適用`
+  cells)
 
 ## Daily prices — TWSE STOCK_DAY
 

@@ -67,6 +67,10 @@ fetch-time report-generation date, not a filing date). Confirmed, not a maybe. T
 - **Forward capture:** `tw.sync()` re-fetches current + prior month's files, diffs against
   the store, records first-seen date as true `announce_date` (`estimated=False`). Users
   who want real dates run it daily (cron); twmarket stays a library, not a service.
+  *(Amended 2026-10-01: each sync also records that it looked. A first sighting after
+  the deadline falls back to the deadline estimate only when no earlier check on or after
+  the deadline exists; if one does, the row arrived late and is dated the day it appeared.
+  Revenue history starts at 2013-01, when MOPS moved to IFRS consolidated revenue.)*
 - **Restatements:** a changed figure between snapshots = new observation row with its own
   observed date and `is_restated=True`. **Never discard the original row** — that
   reintroduces the lookahead bias this package exists to prevent. Default query returns

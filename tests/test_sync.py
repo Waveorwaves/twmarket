@@ -196,3 +196,48 @@ def test_sync_rejects_a_thin_month_only_after_its_deadline(fetch_returns, first_
 
     appended = sync_period("2025-06", today=dt.date(2025, 7, 3))  # window still open
     assert len(appended) == 38
+
+
+def test_late_filer_is_dated_when_it_appeared(fetch_returns, mops_fixture_bytes, without_ticker):
+    """A company that files after the deadline, while sync() is running daily.
+
+    We looked on 07-14, past the 07-10 deadline, and 1101 was not there. When it
+    turns up on 07-15 that is when it became knowable. Falling back to the
+    deadline would date the figure five days before it existed.
+    """
+    fetch_returns["content"] = without_ticker("1101")
+    sync_period("2025-06", today=dt.date(2025, 7, 9))
+    sync_period("2025-06", today=dt.date(2025, 7, 14))  # nothing new, but we looked
+    fetch_returns["content"] = mops_fixture_bytes
+    appended = sync_period("2025-06", today=dt.date(2025, 7, 15))
+
+    row = appended[appended["ticker"] == "1101"].iloc[0]
+    assert row["announce_date"] == dt.date(2025, 7, 15)
+    assert not row["announce_date_estimated"]
+    assert tw.revenue("1101", "2025-06", "2025-06", as_of="2025-07-14").empty
+    assert len(tw.revenue("1101", "2025-06", "2025-06", as_of="2025-07-15")) == 1
+
+
+def test_late_filer_after_a_cold_start(fetch_returns, mops_fixture_bytes, without_ticker):
+    """The first snapshot is itself after the deadline; a later arrival is still late."""
+    fetch_returns["content"] = without_ticker("1101")
+    first = sync_period("2025-06", today=dt.date(2025, 8, 1))
+    assert first["announce_date_estimated"].all()  # cold start: everything is an estimate
+    fetch_returns["content"] = mops_fixture_bytes
+    appended = sync_period("2025-06", today=dt.date(2025, 8, 15))
+
+    row = appended[appended["ticker"] == "1101"].iloc[0]
+    assert row["announce_date"] == dt.date(2025, 8, 15)
+    assert not row["announce_date_estimated"]
+
+
+def test_late_filer_after_a_backfill(fetch_returns, mops_fixture_bytes, without_ticker):
+    """A month cached by revenue() counts as a snapshot too."""
+    fetch_returns["content"] = without_ticker("1101")
+    ensure_period("2025-06", today=dt.date(2025, 8, 1))
+    fetch_returns["content"] = mops_fixture_bytes
+    appended = sync_period("2025-06", today=dt.date(2025, 8, 15))
+
+    row = appended[appended["ticker"] == "1101"].iloc[0]
+    assert row["announce_date"] == dt.date(2025, 8, 15)
+    assert not row["announce_date_estimated"]

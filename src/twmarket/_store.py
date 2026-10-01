@@ -3,10 +3,16 @@
 Grain: (ticker, period, observed_date). Rows are never overwritten or deleted;
 queries derive "latest" or "as-of" views from the observation history.
 Set TWMARKET_DATA_DIR to relocate the store (used by tests).
+
+Observations only record what changed. `revenue/checked.json` records when each
+period was last compared with MOPS, including the days nothing had changed —
+without it "this company was not there yesterday" leaves no trace.
 """
 
 from __future__ import annotations
 
+import datetime as dt
+import json
 import os
 import re
 from pathlib import Path
@@ -42,6 +48,32 @@ def has_revenue_period(period: str) -> bool:
 def load_revenue_period(period: str) -> pd.DataFrame | None:
     path = _revenue_path(period)
     return pd.read_parquet(path) if path.exists() else None
+
+
+def _checked_path() -> Path:
+    return data_dir() / "revenue" / "checked.json"
+
+
+def revenue_last_checked(period: str) -> dt.date | None:
+    """Date the store was last brought level with MOPS for this period, if recorded."""
+    path = _checked_path()
+    if not path.exists():
+        return None
+    value = json.loads(path.read_text()).get(period)
+    return dt.date.fromisoformat(value) if value else None
+
+
+def mark_revenue_checked(period: str, date: dt.date) -> None:
+    """Record that the store matched MOPS for this period on `date`."""
+    path = _checked_path()
+    checks = json.loads(path.read_text()) if path.exists() else {}
+    if checks.get(period, "") < date.isoformat():
+        checks[period] = date.isoformat()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Write-then-rename, so an interrupted run cannot leave half a file behind.
+        scratch = path.with_suffix(".json.tmp")
+        scratch.write_text(json.dumps(checks, indent=0, sort_keys=True))
+        os.replace(scratch, path)
 
 
 def list_revenue_periods() -> list[str]:

@@ -81,6 +81,10 @@ generated at fetch time. So:
   appears **after** the deadline (a cold start, or a cron that was down), it was filed at
   a time MOPS does not record, so `twmarket` falls back to the deadline estimate and says
   so rather than dating the figure late and calling it authoritative.
+- **Late filers are dated when they actually appear.** Each `sync()` records that it
+  looked, even on days nothing changed. So if a check after the deadline did not have a
+  company and a later one does, that company filed late, and its `announce_date` is the
+  day it showed up — not the deadline it missed.
 - **Restatements**: a changed figure between snapshots is appended as a *new* observation
   with `is_restated=True` and its own date. The original row is **never discarded** —
   `tw.revenue(..., as_of=...)` returns exactly what was knowable at that date.
@@ -114,6 +118,18 @@ generated at fetch time. So:
 TWSE-listed only. Not included: TPEx/OTC, quarterly financials, adjusted prices,
 institutional flows, real-time quotes. The calendar is historical — it cannot predict
 future trading days (price history starts 2010-01-04, the TWSE API floor).
+
+Known limits:
+
+- **Revenue starts at 2013-01.** MOPS moved to IFRS consolidated revenue that month;
+  earlier files use a different layout and their figures are not comparable. An earlier
+  `start` raises `ValueError`.
+- **Restatements are only caught for the current and previous month**, because those are
+  the two files `sync()` re-checks. A figure revised later than that goes unnoticed.
+- **`prices()` takes all-digit tickers only** (`"2330"`, `"0050"`). Codes with a letter,
+  such as the leveraged ETF `00631L` or preferred shares, are rejected.
+- **One process at a time.** The local store has no locking, so don't run `sync()` and a
+  query against the same store at the same moment.
 
 See [docs/sources.md](docs/sources.md) for endpoint details and
 [twmarket.md](twmarket.md) for the full spec.

@@ -144,3 +144,26 @@ def test_delisted_company_needs_an_end_within_its_history(
     with pytest.raises(ValueError, match="delisted.*`end`"):
         tw.revenue("1101", "2025-05", "2025-06")
     assert list(tw.revenue("1101", "2025-05", "2025-05")["period"]) == ["2025-05"]
+
+
+def test_fully_synced_month_is_not_downloaded_again(use_mops_fixture):
+    """Everyone filed early and later syncs found nothing new.
+
+    The store holds no row dated after the deadline, yet the month is complete:
+    sync() checked it after the deadline. Queries must not go back to MOPS.
+    """
+    from twmarket.sync import sync_period
+
+    sync_period("2025-06", today=dt.date(2025, 7, 9))
+    sync_period("2025-06", today=dt.date(2025, 7, 11))  # past the 07-10 deadline, nothing new
+    use_mops_fixture.clear()
+    for _ in range(3):
+        tw.revenue("2330", "2025-06", "2025-06")
+    assert use_mops_fixture == []
+
+
+def test_revenue_before_2013_is_rejected_up_front(use_mops_fixture):
+    """MOPS switched to IFRS consolidated revenue, and a new page layout, in 2013-01."""
+    with pytest.raises(ValueError, match="2013-01"):
+        tw.revenue("2330", "2012-12", "2013-03")
+    assert use_mops_fixture == []

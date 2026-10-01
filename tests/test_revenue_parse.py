@@ -6,6 +6,7 @@ from twmarket.revenue import parse_bulk_file
 
 FIXTURE = Path(__file__).parent / "fixtures" / "t21sc03_114_6_0.html"
 UNPUBLISHED = Path(__file__).parent / "fixtures" / "t21sc03_115_9_0_unpublished.html"
+JAN_2013 = Path(__file__).parent / "fixtures" / "t21sc03_102_1_0_head.html"
 
 
 def _parse():
@@ -64,3 +65,14 @@ def test_zero_rows_without_the_no_data_page_raises():
 def test_empty_response_raises():
     with pytest.raises(ValueError, match="layout"):
         parse_bulk_file(b"", "2025-06")
+
+
+def test_not_applicable_cells_parse_as_missing():
+    # January 2013 was the first month of IFRS consolidated reporting, so there is
+    # no prior month to compare with: MOPS prints 不適用 ("not applicable") there.
+    # Fixture: the first 40 rows of the real 102/1 file, recorded 2026-10-01.
+    df = parse_bulk_file(JAN_2013.read_bytes(), "2013-01")
+    row = df[df["ticker"] == "1101"].iloc[0]
+    assert row["revenue_twd"] > 0
+    assert df["mom_pct"].isna().all()
+    assert df["yoy_pct"].notna().any()

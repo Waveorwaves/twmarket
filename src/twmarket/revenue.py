@@ -22,6 +22,11 @@ logger = logging.getLogger("twmarket")
 
 BACKFILL_START = "2015-01"
 
+#: First month this package can serve. MOPS moved to IFRS consolidated revenue in
+#: January 2013; earlier bulk files use a different page layout and their figures
+#: are not on that basis, so they are not comparable with what follows.
+EARLIEST_PERIOD = "2013-01"
+
 #: How far past the statutory deadline to look for the next trading day. The
 #: longest TWSE closure is the Lunar New Year break (~9 calendar days), and
 #: 10 + 14 stays inside the same month, so this costs one cached price-month.
@@ -58,7 +63,9 @@ def _clean(cell: str) -> str:
 
 def _num(text: str) -> float | None:
     text = text.replace(",", "").strip()
-    if text in ("", "-"):
+    # 不適用 = "not applicable": e.g. no prior month to compare with in 2013-01,
+    # the first month of IFRS reporting.
+    if text in ("", "-", "不適用"):
         return None
     return float(text)
 
@@ -172,19 +179,33 @@ def announce_date_for(period: str) -> dt.date:
     return estimate_announce_date(period)
 
 
+def last_checked(period: str, stored: pd.DataFrame | None) -> dt.date | None:
+    """Latest date on which the store is known to have matched MOPS for a period.
+
+    The recorded check date where there is one, otherwise the newest observation
+    (stores written before check dates were recorded have only that).
+    """
+    dates = [_store.revenue_last_checked(period)]
+    if stored is not None and not stored.empty:
+        dates.append(max(stored["observed_date"]))
+    dates = [d for d in dates if d is not None]
+    return max(dates) if dates else None
+
+
 def _is_settled(stored: pd.DataFrame, period: str) -> bool:
-    """True if some stored observation postdates the period's filing deadline.
+    """True if the store was compared with MOPS after the period's filing deadline.
 
     Rows written while the filing window was still open — by an early query, or
     by a `sync()` that ran before the 10th — can be missing every company that
-    filed later, so the file cannot be taken as complete.
+    filed later, so the file cannot be taken as complete until something has
+    looked again after the deadline.
     """
-    last_seen = max(stored["observed_date"])
+    checked = last_checked(period, stored)
     # Cheap bound first: past the widest possible roll no calendar is needed,
     # which keeps the fully-cached query path free of price lookups.
-    if last_seen > statutory_deadline(period) + dt.timedelta(days=ANNOUNCE_ROLL_WINDOW_DAYS):
+    if checked > statutory_deadline(period) + dt.timedelta(days=ANNOUNCE_ROLL_WINDOW_DAYS):
         return True
-    return last_seen > announce_date_for(period)
+    return checked > announce_date_for(period)
 
 
 def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
@@ -225,6 +246,7 @@ def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
     if today > announce:
         check_settled_row_count(df, period)
         _store.append_revenue_observations(period, df)
+        _store.mark_revenue_checked(period, today)
     else:
         logger.info(
             "%s filing window is still open (deadline %s) — serving fresh, not caching",
@@ -281,6 +303,11 @@ def get_revenue(
     periods = _month_range(start, end)
     if not periods:
         raise ValueError(f"start {start} is after end {end}")
+    if start < EARLIEST_PERIOD:
+        raise ValueError(
+            f"revenue history starts at {EARLIEST_PERIOD} (got start={start}): MOPS moved to "
+            "IFRS consolidated revenue that month, and earlier files are not comparable"
+        )
 
     today = taipei_today()
     loaded: dict[str, pd.DataFrame] = {}

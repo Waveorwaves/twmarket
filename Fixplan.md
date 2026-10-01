@@ -25,10 +25,11 @@ version bump, tags, and the PyPI publish.
 | P2 — coverage gaps | ✅ Done: 98%, CI gate at 90% |
 | P2 — `parse_bulk_file` fails open | ✅ Done: zero-row raise, row floor, 合計 check removed |
 | P2 — spec conflicts with `twmarket.md` | ✅ All four resolved |
-| Review 2026-09-29 — four further defects | ✅ Done 2026-10-01 (see "Independent review") |
+| Review 2026-09-29 — four further defects | ✅ Done, `d954ea6` (see "Independent review") |
+| Found 2026-10-01 — late filers, re-downloads, pre-2013 | ✅ Done 2026-10-01 (see "Found after the review") |
 | P3 — repository hygiene | **Open — next.** History decision made (leave as is) |
 
-Current tree: 117 tests pass on Python 3.12 / pandas 3 and Python 3.10 / pandas 2.3 (the
+Current tree: 123 tests pass on Python 3.12 / pandas 3 and Python 3.10 / pandas 2.3 (the
 CI matrix), `ruff check` clean, 98% coverage.
 
 ## Decisions
@@ -308,6 +309,42 @@ GitHub repo description and topics, and read the README once as a first-time use
 
 ---
 
+## Found after the review — 2026-10-01 (all fixed the same day)
+
+Three defects that neither the builder nor the reviewer had tested for. Each was
+reproduced before it was fixed.
+
+1. **Late filers were dated before they filed — lookahead.** P0's rule sends every first
+   sighting after the deadline to the deadline estimate. That is right for a cold start,
+   and wrong when `sync()` was already watching: a check on 07-14 without company X,
+   then X appearing on 07-15, was recorded as announced 07-10. The store could not tell
+   the two cases apart, because a sync that finds nothing new left no trace.
+
+   *Fix:* `revenue/checked.json` records the date of every successful comparison with
+   MOPS, including the days nothing changed. P0's table gains a fourth row:
+
+   | Row type | Condition | `announce_date` | `announce_date_estimated` |
+   | --- | --- | --- | --- |
+   | `is_new` | `today > deadline`, and an earlier check on or after the deadline exists | `today` | `False` |
+
+   The estimate still applies when no such earlier check exists (a cold start, or a cron
+   that was down across the deadline).
+2. **A fully synced month could be re-downloaded on every query, forever.** "Settled"
+   meant "some stored row is dated after the deadline". If everyone filed early and later
+   syncs found nothing, no such row ever existed. "Settled" now means "compared with MOPS
+   after the deadline", from the same check dates.
+3. **Revenue before 2013-02 did not work.** 2013-01 crashed on `不適用` ("not
+   applicable") cells; 2012 and earlier use a 10-cell layout and predate IFRS
+   consolidated revenue. `不適用` now parses as missing, and `revenue()` rejects a
+   `start` before `2013-01` without fetching. The default range (2015-01 on) was never
+   affected.
+
+Known limits, documented in the README and left as designed: restatements are caught
+only for the current and previous month; `prices()` takes all-digit tickers only; the
+store has no locking.
+
+---
+
 ## P3 — Repository hygiene
 
 Independent of the code. Can be done in any order, except that **5 waits for P1 and
@@ -381,6 +418,8 @@ The v0.2 parking lot exists. Use it.
 - [x] Spec conflicts 1–2 decided and `twmarket.md` amended to match (2026-09-28)
 - [x] Spec conflicts 3–4 fixed in code (empty-frame dtypes; calendar helpers exported)
 - [x] The four defects from the 2026-09-29 review fixed (2026-10-01)
+- [x] Late filers dated when they appear; settled months not re-downloaded; revenue
+      served from 2013-01 with earlier ranges rejected (2026-10-01)
 - [x] History decision made: leave as is (2026-09-28)
 - [ ] `v0.1.0` and `v0.1.1` tagged
 - [ ] `v0.1.1` published to PyPI by trusted publishing from the tag; README install line
