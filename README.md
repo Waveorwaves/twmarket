@@ -91,8 +91,13 @@ generated at fetch time. So:
 
 ## Error semantics
 
-- Invalid ticker → `ValueError`
-- Valid ticker with no data in range → empty DataFrame with correct columns
+- Malformed ticker → `ValueError` (all functions)
+- `revenue()`: ticker not found in any month of the requested range → `ValueError` (check
+  for a typo; a delisted or newly listed company needs a range that covers its history).
+  Ticker found, but nothing knowable yet (e.g. `as_of` before the announce date) → empty
+  DataFrame with the correct columns.
+- `prices()`: no data in range → empty DataFrame with the correct columns. TWSE answers
+  an unknown ticker exactly like a month with no trading, so the two can't be told apart.
 
 ## Scope (v0.1)
 

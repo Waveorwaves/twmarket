@@ -72,8 +72,11 @@ fetch-time report-generation date, not a filing date). Confirmed, not a maybe. T
   reintroduces the lookahead bias this package exists to prevent. Default query returns
   latest; `as_of` returns what was knowable then. Detection only works from the date
   snapshotting begins — document.
-- **yoy/mom:** MOPS publishes these, but compute from stored revenue for internal
-  consistency; note possible divergence around mergers/restatements.
+- **yoy/mom:** use the values MOPS publishes, stored as-is; note possible divergence
+  from stored revenue around mergers/restatements. *(Amended 2026-09-28; originally
+  "compute from stored revenue". Computing yoy needs the same month a year earlier in
+  the store, which a 2015-01 backfill start lacks for 2015; restatement-consistent
+  recomputation is v0.2 material.)*
 
 ## 5. Public API (v0.1)
 
@@ -91,8 +94,17 @@ tw.sync()                                # snapshot job: capture announce dates/
 Revenue columns: `ticker, period (YYYY-MM), revenue_twd, yoy_pct, mom_pct, announce_date,
 announce_date_estimated, is_restated`. Prices: `date, open, high, low, close, volume, turnover`.
 
-**Error semantics:** invalid ticker → `ValueError`; valid ticker with no data in range →
-empty DataFrame with correct dtypes.
+**Error semantics:** malformed ticker → `ValueError` everywhere. `revenue()`: ticker
+absent from every month in the range → `ValueError` (it may be a typo, delisted, or not
+yet listed — the message says so and suggests an explicit range); ticker present in the
+range but no rows survive the query (e.g. `as_of` before any announce date) → empty
+DataFrame with correct dtypes. `prices()`: no data in range → empty DataFrame with
+correct dtypes (TWSE returns the same response for an unknown ticker as for an empty
+month, so `prices()` cannot raise on unknown tickers).
+*(Amended 2026-09-28; originally "valid ticker with no data in range → empty DataFrame".
+Without a listings registry — out of scope — "never existed" and "not listed yet" look
+identical, and raising makes a typo that lands on a nonexistent code, like `23300` for
+`2330`, fail loudly instead of looking like an empty history.)*
 
 ## 6. Build steps (each = one sitting, commit after each)
 
