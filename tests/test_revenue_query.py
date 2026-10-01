@@ -76,3 +76,23 @@ def test_open_window_refetches_until_settled(use_mops_fixture):
     ensure_period("2025-06", today=dt.date(2025, 7, 11))
     ensure_period("2025-06", today=dt.date(2025, 7, 12))
     assert len(use_mops_fixture) == 3  # settled, then served from the store
+
+
+def test_unpublished_month_is_never_cached(monkeypatch, mops_unpublished_bytes):
+    """A 查無資料 page means "ask again later", even after the deadline."""
+    from twmarket import _store
+    from twmarket.revenue import ensure_period
+
+    monkeypatch.setattr("twmarket._client.fetch_mops_revenue", lambda y, m: mops_unpublished_bytes)
+    df = ensure_period("2026-08", today=dt.date(2026, 9, 28))  # deadline long passed
+    assert df.empty
+    assert not _store.has_revenue_period("2026-08")
+
+
+def test_unpublished_month_in_range_leaves_the_rest(
+    monkeypatch, mops_fixture_bytes, mops_unpublished_bytes
+):
+    pages = {(114, 6): mops_fixture_bytes, (114, 7): mops_unpublished_bytes}
+    monkeypatch.setattr("twmarket._client.fetch_mops_revenue", lambda y, m: pages[(y, m)])
+    df = tw.revenue("2330", "2025-06", "2025-07")
+    assert list(df["period"]) == ["2025-06"]

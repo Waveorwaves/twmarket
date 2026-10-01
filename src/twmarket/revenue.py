@@ -34,6 +34,10 @@ _ROW_RE = re.compile(r"<tr align=right>(.*?)</tr>", re.I | re.S)
 _CELL_RE = re.compile(r"<td[^>]*>(.*?)</td>", re.I | re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
 
+# MOPS answers a month nobody has filed yet with HTTP 200 and a short page whose
+# only content is this "no data found" message — never with a 404.
+_UNPUBLISHED_MARKER = "查無資料"
+
 
 def _clean(cell: str) -> str:
     return _TAG_RE.sub("", cell).replace("&nbsp;", " ").strip()
@@ -51,6 +55,11 @@ def parse_bulk_file(content: bytes, period: str) -> pd.DataFrame:
 
     Columns: ticker, name, period, revenue_twd (source is thousand NTD; converted
     to NTD here), yoy_pct, mom_pct. Industry 合計 (total) rows are excluded.
+
+    Returns an empty frame only for MOPS's "no data found" page, i.e. a month
+    that is not published yet. Any other page that yields no rows raises
+    ValueError: it almost certainly means MOPS changed its layout, and an empty
+    result would otherwise pass for a month in which nobody filed.
     """
     text = content.decode("big5", errors="replace")
     records = []
@@ -70,6 +79,11 @@ def parse_bulk_file(content: bytes, period: str) -> pd.DataFrame:
                 "mom_pct": _num(cells[5]),
                 "yoy_pct": _num(cells[6]),
             }
+        )
+    if not records and _UNPUBLISHED_MARKER not in text:
+        raise ValueError(
+            f"MOPS bulk file for {period} parsed to zero rows ({len(content):,} bytes) "
+            "and is not the 'no data found' page — the page layout may have changed"
         )
     df = pd.DataFrame.from_records(
         records, columns=["ticker", "name", "period", "revenue_twd", "mom_pct", "yoy_pct"]
@@ -172,6 +186,10 @@ def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
     logger.info("fetching MOPS bulk file for %s", period)
     content = _client.fetch_mops_revenue(gregorian_year_to_roc(year), month)
     df = parse_bulk_file(content, period)
+    if df.empty:
+        # Not published yet. Never cache it: the next query should ask again.
+        logger.info("%s is not published on MOPS yet", period)
+        return _store.normalize_revenue(pd.DataFrame(columns=list(_store.REVENUE_COLUMNS)))
     announce = announce_date_for(period)
     df["announce_date"] = announce
     df["announce_date_estimated"] = True

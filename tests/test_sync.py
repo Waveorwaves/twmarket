@@ -1,6 +1,7 @@
 import datetime as dt
 
 import pytest
+import requests
 
 import twmarket as tw
 from twmarket import _store
@@ -128,3 +129,59 @@ def test_partial_month_from_an_early_sync_is_topped_up(fetch_returns, mops_fixtu
     fetch_returns["content"] = mops_fixture_bytes  # 2330 files before the deadline
     df = tw.revenue("2330", "2025-06", "2025-06", as_of="2025-07-31")
     assert df.iloc[0]["revenue_twd"] == 263_708_978_000
+
+
+def _raising(exc):
+    def _fetch(roc_year, month):
+        raise exc
+
+    return _fetch
+
+
+def _http_error(status):
+    response = requests.Response()
+    response.status_code = status
+    return requests.HTTPError(f"{status} Server Error", response=response)
+
+
+def test_unpublished_month_is_skipped(monkeypatch, mops_unpublished_bytes):
+    monkeypatch.setattr("twmarket._client.fetch_mops_revenue", lambda y, m: mops_unpublished_bytes)
+    appended = sync_period("2026-09", today=dt.date(2026, 9, 28))
+    assert appended.empty
+    assert not _store.has_revenue_period("2026-09")
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [requests.ConnectionError("network down"), _http_error(500)],
+    ids=["connection-error", "http-500"],
+)
+def test_fetch_failures_propagate(monkeypatch, exc):
+    """A failed fetch must reach the cron job, not look like a quiet day.
+
+    Observations that were never captured cannot be reconstructed later, so a
+    sync that silently does nothing for months is the worst failure available.
+    """
+    monkeypatch.setattr("twmarket._client.fetch_mops_revenue", _raising(exc))
+    with pytest.raises(type(exc)):
+        sync_period("2025-06", today=dt.date(2025, 7, 8))
+
+
+def test_layout_change_propagates_and_stores_nothing(fetch_returns, mops_fixture_bytes):
+    fetch_returns["content"] = mops_fixture_bytes[:2000]  # header only, no rows
+    with pytest.raises(ValueError, match="layout"):
+        sync_period("2025-06", today=dt.date(2025, 7, 8))
+    assert not _store.has_revenue_period("2025-06")
+
+
+def test_revenue_top_up_does_not_hide_fetch_failures(fetch_returns, monkeypatch):
+    """revenue() tops up an unsettled month through sync_period.
+
+    A failed top-up must surface rather than quietly serve the stale partial
+    month that is already in the store.
+    """
+    sync_period("2025-06", today=dt.date(2025, 7, 5))  # before the deadline: unsettled
+    down = _raising(requests.ConnectionError("network down"))
+    monkeypatch.setattr("twmarket._client.fetch_mops_revenue", down)
+    with pytest.raises(requests.ConnectionError):
+        tw.revenue("2330", "2025-06", "2025-06")

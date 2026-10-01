@@ -22,12 +22,15 @@ Detection only works from the date snapshotting begins.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 import pandas as pd
 
 from . import _client, _store
 from ._dates import gregorian_year_to_roc, parse_period
 from .revenue import announce_date_for, parse_bulk_file
+
+logger = logging.getLogger("twmarket")
 
 
 def _current_and_prior_periods(today: dt.date) -> list[str]:
@@ -45,13 +48,14 @@ def sync_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
     """Snapshot one period; returns the newly appended observations."""
     today = today or dt.date.today()
     year, month = parse_period(period)
-    try:
-        content = _client.fetch_mops_revenue(gregorian_year_to_roc(year), month)
-    except Exception:
-        # Current month's file may not exist yet (nobody has filed) — skip quietly.
-        return pd.DataFrame()
+    # No error handling on purpose: observations missed today cannot be recovered
+    # later, so a failed fetch or an unparseable page must fail the cron job
+    # loudly rather than pass for a quiet day.
+    content = _client.fetch_mops_revenue(gregorian_year_to_roc(year), month)
     fresh = parse_bulk_file(content, period)
     if fresh.empty:
+        # MOPS's "no data found" page: nobody has filed for this month yet.
+        logger.info("%s is not published on MOPS yet — skipped", period)
         return pd.DataFrame()
 
     stored = _store.load_revenue_period(period)

@@ -1,8 +1,11 @@
 from pathlib import Path
 
+import pytest
+
 from twmarket.revenue import parse_bulk_file
 
 FIXTURE = Path(__file__).parent / "fixtures" / "t21sc03_114_6_0.html"
+UNPUBLISHED = Path(__file__).parent / "fixtures" / "t21sc03_115_9_0_unpublished.html"
 
 
 def _parse():
@@ -40,3 +43,24 @@ def test_columns_and_dtypes():
     assert list(df.columns) == ["ticker", "name", "period", "revenue_twd", "mom_pct", "yoy_pct"]
     assert str(df["revenue_twd"].dtype) == "Int64"
     assert df["yoy_pct"].dtype == "float64"
+
+
+def test_unpublished_month_parses_to_empty():
+    # A month nobody has filed yet is not an HTTP error: MOPS answers 200 with a
+    # short 查無資料 ("no data found") page. Recorded for 115/9 on 2026-09-28.
+    df = parse_bulk_file(UNPUBLISHED.read_bytes(), "2026-09")
+    assert df.empty
+    assert list(df.columns) == ["ticker", "name", "period", "revenue_twd", "mom_pct", "yoy_pct"]
+
+
+def test_zero_rows_without_the_no_data_page_raises():
+    # The first 2 KB of a real file: the page header, no data rows, no 查無資料.
+    # That is what a MOPS layout change looks like, and it must not pass as an
+    # empty month — an empty month is stored as settled and never re-fetched.
+    with pytest.raises(ValueError, match="layout"):
+        parse_bulk_file(FIXTURE.read_bytes()[:2000], "2025-06")
+
+
+def test_empty_response_raises():
+    with pytest.raises(ValueError, match="layout"):
+        parse_bulk_file(b"", "2025-06")

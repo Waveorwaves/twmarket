@@ -46,6 +46,12 @@ def mops_fixture_bytes():
 
 
 @pytest.fixture
+def mops_unpublished_bytes():
+    """MOPS's answer for a month nobody has filed yet: HTTP 200, a 查無資料 page."""
+    return (FIXTURES / "t21sc03_115_9_0_unpublished.html").read_bytes()
+
+
+@pytest.fixture
 def use_mops_fixture(monkeypatch, mops_fixture_bytes):
     """Route fetch_mops_revenue to the recorded June-2025 file for any month."""
     calls = []

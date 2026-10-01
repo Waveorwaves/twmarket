@@ -21,7 +21,14 @@ Verified against live endpoints on 2026-08-12; calendar reference fixtures added
 - **`出表日期` (report date) is fetch-time**, not a filing date. Fixture fetched
   2026-08-12 shows `出表日期：115/08/10` on a June-2025 data file. This confirms the
   point-in-time design in the spec: bulk files preserve no historical announce dates.
-- **Fixture:** `tests/fixtures/t21sc03_114_6_0.html` (June 2025, ~449 KB, raw Big5 bytes)
+- **Unpublished month (nobody has filed yet):** **HTTP 200, not 404** — a ~900-byte
+  page with the table title and `查無資料` ("no data found"). Checked 2026-09-28 for the
+  current month (115/9) and a future one (115/12). `parse_bulk_file` returns an empty
+  frame for this page only; any other page that parses to zero rows raises, because it
+  means the layout changed. A 404 is therefore never "not published" — it would mean the
+  URL scheme changed.
+- **Fixtures:** `tests/fixtures/t21sc03_114_6_0.html` (June 2025, ~449 KB, raw Big5
+  bytes); `t21sc03_115_9_0_unpublished.html` (the real 查無資料 page, 916 bytes)
 
 ## Daily prices — TWSE STOCK_DAY
 
