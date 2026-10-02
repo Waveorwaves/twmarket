@@ -43,8 +43,8 @@ dev = [
 # The source distribution carries the package, its tests and the user-facing docs —
 # not planning notes or whatever else happens to sit in the working directory.
 [tool.hatch.build.targets.sdist]
-# Leading slashes anchor each pattern at the repo root (docs/dev/README.md stays out).
-include = ["/src", "/tests", "/docs/sources.md", "/README.md", "/CHANGELOG.md", "/LICENSE"]
+# Leading slashes anchor each pattern at the repo root.
+include = ["/src", "/tests", "/docs/*.md", "/README.md", "/CHANGELOG.md", "/LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

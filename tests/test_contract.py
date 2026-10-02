@@ -1,4 +1,4 @@
-"""Contract tests: twmarket.md definition-of-done items and point-in-time invariants.
+"""Contract tests: the release checklist and point-in-time invariants.
 
 These do not re-test single behaviours (the module test files do that). They check
 properties that must hold across whole sequences of operations — the ones a
@@ -40,7 +40,7 @@ def _with_tsmc(fixture_bytes: bytes, revenue: bytes) -> bytes:
     return fixture_bytes.replace(TSMC_ORIGINAL, revenue)
 
 
-# --- twmarket.md §7 definition of done ---------------------------------------
+# --- release checklist --------------------------------------------------------
 
 
 def test_dod_as_of_2025_05_before_and_after_the_deadline(use_mops_fixture):
@@ -53,7 +53,7 @@ def test_dod_as_of_2025_05_before_and_after_the_deadline(use_mops_fixture):
 
 
 def test_dod_versions_agree():
-    """Release bumps must touch pyproject.toml and __init__ together (Fixplan P3.5)."""
+    """Release bumps must touch pyproject.toml and __init__ together."""
     pyproject = (ROOT / "pyproject.toml").read_text()
     declared = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.M).group(1)
     assert tw.__version__ == declared

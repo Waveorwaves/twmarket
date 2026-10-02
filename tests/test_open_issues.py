@@ -1,12 +1,11 @@
-"""Executable form of the open v0.1.1 work: each test states the wanted behaviour.
+"""Known defects, each written as a test that states the wanted behaviour.
 
-`xfail(strict=True)` means "known defect, fix pending". The suite stays green today, and
-the moment a fix lands the test XPASSes, which strict mode turns into a failure —
-so the marker has to be deleted in the same commit as the fix and the test becomes a
-permanent regression guard. Never loosen a test here to make a fix pass; fix the code.
+A defect that is still open carries `xfail(strict=True)`: the suite stays green, and the
+moment a fix lands the test passes, which strict mode turns into a failure. The marker
+is then deleted in the same commit as the fix and the test stays as a regression guard.
+Never loosen a test here to make a fix pass; fix the code.
 
-Sections are labelled with their Fixplan.md item, or "REVIEW" where the defect was found
-while reviewing and is not (yet) in the plan.
+Every defect below is fixed, so none carries a marker at present.
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ def _keep_first_rows(content: bytes, n: int) -> bytes:
     return content[:pos]
 
 
-# --- Fixplan P1: unknown ticker costs ~140 fetches ---------------------------
+# --- an unknown ticker used to cost ~140 fetches ------------------------------
 
 
 def test_unknown_ticker_fails_after_one_period_fetch(use_mops_fixture):
@@ -49,7 +48,7 @@ def test_known_ticker_still_gets_the_whole_range(use_mops_fixture):
     assert len(set(use_mops_fixture)) == 18
 
 
-# --- Fixplan P2: parse_bulk_file fails open ----------------------------------
+# --- the parser used to accept a truncated or changed page -------------------
 
 
 def test_settled_period_with_implausibly_few_rows_is_rejected(monkeypatch, mops_fixture_bytes):
@@ -84,7 +83,7 @@ def test_real_total_rows_are_still_excluded(mops_fixture_bytes):
     assert (df["name"] != "合計").all()
 
 
-# --- Fixplan P2 spec conflicts 3 and 4 ---------------------------------------
+# --- empty-frame dtypes; calendar helpers reachable from the package ---------
 
 
 def test_empty_revenue_frame_has_the_same_dtypes_as_a_full_one(use_mops_fixture):
@@ -108,7 +107,7 @@ def test_calendar_function_is_not_shadowed_by_its_module():
     assert list(tw.calendar("2025-01-20", "2025-01-22").columns) == ["date"]
 
 
-# --- REVIEW: found while reading the code, not in Fixplan.md -----------------
+# --- found in code review ----------------------------------------------------
 
 
 def test_future_price_months_are_not_frozen_as_empty():
@@ -161,7 +160,7 @@ def test_sync_uses_the_taipei_date_not_the_machine_date(
 
     The June deadline is 07-10. In Taipei this sighting is past it, so it must fall
     back to the estimate. Dated with the UTC date it looks like an on-time catch and is
-    flagged authoritative: the false-announce-date bug (Fixplan P0) coming back in
+    flagged authoritative: the false-announce-date bug coming back in
     through the clock.
     """
     from twmarket.sync import sync_period
