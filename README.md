@@ -1,5 +1,10 @@
 # twmarket
 
+[![CI](https://github.com/Waveorwaves/twmarket/actions/workflows/ci.yml/badge.svg)](https://github.com/Waveorwaves/twmarket/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/twmarket)](https://pypi.org/project/twmarket/)
+[![Python](https://img.shields.io/pypi/pyversions/twmarket)](https://pypi.org/project/twmarket/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Waveorwaves/twmarket/blob/main/LICENSE)
+
 **Point-in-time Taiwan market data for quant research — in English.**
 
 Taiwan is one of the few markets where every listed company must disclose **monthly revenue**
@@ -17,27 +22,35 @@ that are Chinese-only and hard to navigate programmatically.
   instruments so a single stock's suspension can't masquerade as a market holiday
 
 All data is cached locally in `~/.twmarket/` (parquet) — fetch once, query forever.
-Requests are politely rate-limited (≥1 s spacing).
+Requests are politely rate-limited (≥1 s spacing), so **the first call for a range is
+slow: about 6 seconds per month of revenue history**. Six months takes about half a
+minute; the full history from 2015 takes about 15 minutes. A progress line shows it is
+working. After that, a full-history query for any ticker takes about a quarter of a
+second, so looping over hundreds of tickers is practical. Set `TWMARKET_PROGRESS=0` to silence
+the progress line.
 
 ## Install
 
 ```bash
-pip install git+https://github.com/Waveorwaves/twmarket.git
+pip install twmarket
 ```
 
-Requires Python 3.10+.
+Requires Python 3.10 or newer (tested on 3.10 to 3.14, with pandas 2.0 through 3.x, on
+Linux and macOS). Windows should work but has not been tested.
 
 ## Quickstart
 
 ```python
 import twmarket as tw
 
-# Monthly revenue (first call backfills from MOPS; ~1 request per month of data)
-rev = tw.revenue("2330", "2024-01", "2025-06")
+# Monthly revenue. The first call downloads from MOPS (about 30 s for these six
+# months, with a progress line); after that it is served from the local cache.
+rev = tw.revenue("2330", "2025-01", "2025-06")
 #   ticker, period, revenue_twd, yoy_pct, mom_pct,
 #   announce_date, announce_date_estimated, is_restated
 
 # Point-in-time: only figures that were knowable on that date
+# (dates can be strings like this, or date / datetime / pandas Timestamp objects)
 rev_pit = tw.revenue("2330", "2025-01", "2025-06", as_of="2025-06-05")
 ```
 
@@ -65,7 +78,9 @@ fundamental signal in the Taiwan market — if you handle announce timing honest
 ## Point-in-time honesty (read this before backtesting)
 
 The MOPS bulk files preserve **no historical filing timestamps** — their report date is
-generated at fetch time. So:
+generated at fetch time. So **every announce date for history is an estimate**, and is
+flagged as one. Real, observed dates exist only for months that pass while you run
+`tw.sync()` daily. In detail:
 
 - **Backfilled history** gets `announce_date` = statutory deadline (10th of the following
   month, rolled forward to the next **trading day**), flagged
@@ -113,6 +128,19 @@ generated at fetch time. So:
 - `yoy_pct` / `mom_pct` come from MOPS as published; they may diverge from values you
   compute from stored revenue around mergers and restatements.
 
+## Running `sync()` every day
+
+Any scheduler works. With cron, once a day late in the Taiwan evening (23:00 in Taipei is
+15:00 UTC), so that day's filings are stamped with that day:
+
+```bash
+0 15 * * * /full/path/to/python -c "import twmarket as tw; tw.sync()" >> ~/twmarket-sync.log 2>&1
+```
+
+Adjust the hour to your machine's timezone. `sync()` raises if MOPS cannot be reached, so
+a failed run shows up in the log instead of passing silently — a missed day cannot be
+recovered later.
+
 ## Error semantics
 
 - Malformed ticker → `ValueError` (all functions). Tickers are strings: `"0050"`, not
@@ -129,7 +157,7 @@ generated at fetch time. So:
 - `prices()`: no data in range → empty DataFrame with the correct columns. TWSE answers
   an unknown ticker exactly like a month with no trading, so the two can't be told apart.
 
-## Scope (v0.1)
+## Scope (v0.1.x)
 
 TWSE-listed only. Not included: TPEx/OTC, quarterly financials, adjusted prices,
 institutional flows, real-time quotes. The calendar is historical — it cannot predict
@@ -146,9 +174,13 @@ Known limits:
   such as the leveraged ETF `00631L` or preferred shares, are rejected.
 - **One process at a time.** The local store has no locking, so don't run `sync()` and a
   query against the same store at the same moment.
+- **Interrupting a download is safe.** Months already downloaded stay cached and the next
+  call carries on from there. If a stored revenue file ever becomes unreadable, the error
+  names the file; delete it and that month is downloaded again.
 
-See [docs/sources.md](docs/sources.md) for endpoint details and
-[twmarket.md](twmarket.md) for the full spec.
+See [docs/sources.md](https://github.com/Waveorwaves/twmarket/blob/main/docs/sources.md) for endpoint details, the
+[changelog](https://github.com/Waveorwaves/twmarket/blob/main/CHANGELOG.md) for what changed in each version, and
+[docs/dev/](https://github.com/Waveorwaves/twmarket/tree/main/docs/dev) for the specification and development records.
 
 ## Development
 

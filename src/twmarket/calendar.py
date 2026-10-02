@@ -20,6 +20,7 @@ import datetime as dt
 
 import pandas as pd
 
+from ._dates import to_date
 from .prices import get_prices
 
 #: Reference instruments, most liquid first. 0050 (Yuan Ta Taiwan 50 ETF) and
@@ -51,14 +52,26 @@ def trading_days(
 
 
 def is_trading_day(date: str | dt.date) -> bool:
-    """True if the market traded on this (historical) date."""
-    d = dt.date.fromisoformat(date) if isinstance(date, str) else date
+    """True if the market traded on this (historical) date.
+
+    Example:
+        >>> import twmarket as tw
+        >>> tw.is_trading_day("2025-01-22"), tw.is_trading_day("2025-01-28")
+        (True, False)
+    """
+    d = to_date(date, "date")
     return d in trading_days(d.isoformat(), d.isoformat())
 
 
 def next_trading_day(date: str | dt.date, max_lookahead_days: int = 30) -> dt.date:
-    """First trading day strictly after `date` (historical data only)."""
-    d = dt.date.fromisoformat(date) if isinstance(date, str) else date
+    """First trading day strictly after `date` (historical data only).
+
+    Example:
+        >>> import twmarket as tw
+        >>> tw.next_trading_day("2025-01-22")  # the Lunar New Year break follows
+        datetime.date(2025, 2, 3)
+    """
+    d = to_date(date, "date")
     horizon = d + dt.timedelta(days=max_lookahead_days)
     days = sorted(trading_days(d.isoformat(), horizon.isoformat()))
     for day in days:

@@ -8,6 +8,7 @@ from twmarket._dates import (
     parse_period,
     parse_roc_date,
     roc_year_to_gregorian,
+    to_date,
 )
 
 
@@ -68,3 +69,19 @@ def test_estimate_announce_date_with_calendar():
         return d.weekday() < 5 and d not in holidays
 
     assert estimate_announce_date("2025-06", is_trading_day) == dt.date(2025, 7, 14)
+
+
+def test_to_date_accepts_what_people_actually_pass():
+    import pandas as pd
+
+    expected = dt.date(2025, 6, 30)
+    assert to_date("2025-06-30", "end") == expected
+    assert to_date(expected, "end") == expected
+    assert to_date(dt.datetime(2025, 6, 30, 9, 30), "end") == expected
+    assert to_date(pd.Timestamp("2025-06-30"), "end") == expected
+
+
+def test_to_date_names_the_argument_and_the_expected_form():
+    for bad in ("2025/06/30", "2025-06", "20250630", "June 30", "2025-02-30", 20250630, None):
+        with pytest.raises(ValueError, match=r"as_of must be a date like '2025-06-30'"):
+            to_date(bad, "as_of")

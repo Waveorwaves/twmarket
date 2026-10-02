@@ -23,6 +23,7 @@ TAIPEI = dt.timezone(dt.timedelta(hours=8), "Asia/Taipei")
 MAX_ANNOUNCE_ROLL_DAYS = 30
 
 _ROC_DATE_RE = re.compile(r"^\s*(\d{2,3})/(\d{1,2})/(\d{1,2})\s*$")
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def taipei_today() -> dt.date:
@@ -33,6 +34,25 @@ def taipei_today() -> dt.date:
     stamped with it would claim a figure was knowable a day before it existed.
     """
     return dt.datetime.fromtimestamp(time.time(), TAIPEI).date()
+
+
+def to_date(value: object, name: str) -> dt.date:
+    """Read a date argument: '2025-06-30', a date, a datetime or a pandas Timestamp.
+
+    `name` is the argument's name, so the error says which one was wrong. The
+    string form is checked against YYYY-MM-DD here because what
+    `date.fromisoformat` accepts differs between Python versions.
+    """
+    if isinstance(value, dt.datetime):  # pandas.Timestamp is a datetime
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    if isinstance(value, str) and _ISO_DATE_RE.match(value):
+        try:
+            return dt.date.fromisoformat(value)
+        except ValueError:
+            pass  # right shape, impossible date (2025-02-30)
+    raise ValueError(f"{name} must be a date like '2025-06-30', got {value!r}")
 
 
 def roc_year_to_gregorian(roc_year: int) -> int:

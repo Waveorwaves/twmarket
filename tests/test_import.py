@@ -2,7 +2,7 @@ import twmarket
 
 
 def test_import():
-    assert twmarket.__version__ == "0.1.0"
+    assert twmarket.__version__ == "0.1.1"
 
 
 def test_public_api_exists():

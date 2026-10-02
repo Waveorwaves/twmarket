@@ -8,7 +8,8 @@ import re
 import pandas as pd
 
 from . import _client, _store
-from ._dates import parse_roc_date, taipei_today
+from ._dates import parse_roc_date, taipei_today, to_date
+from ._progress import Progress
 
 _TICKER_RE = re.compile(r"^\d{4,6}$")
 
@@ -70,9 +71,13 @@ def _months_between(start: dt.date, end: dt.date) -> list[tuple[int, int]]:
     return months
 
 
+def _month_key(ticker: str, year: int, month: int) -> str:
+    return f"{ticker}_{year:04d}-{month:02d}"
+
+
 def ensure_month(ticker: str, year: int, month: int) -> pd.DataFrame:
     """Load one ticker-month from the store, fetching and caching if missing."""
-    key = f"{ticker}_{year:04d}-{month:02d}"
+    key = _month_key(ticker, year, month)
     cached = _store.load_prices_month(key)
     if cached is not None:
         return cached
@@ -90,15 +95,22 @@ def ensure_month(ticker: str, year: int, month: int) -> pd.DataFrame:
     return df
 
 
-def get_prices(ticker: str, start: str, end: str) -> pd.DataFrame:
-    """Daily OHLCV for one ticker between two ISO dates (inclusive)."""
+def get_prices(ticker: str, start: str | dt.date, end: str | dt.date) -> pd.DataFrame:
+    """Daily OHLCV for one ticker between two dates (inclusive)."""
     # Strings only: an int cannot carry a leading zero (0050 would arrive as 50).
     if not isinstance(ticker, str) or not _TICKER_RE.fullmatch(ticker):
         raise ValueError(f"invalid ticker: {ticker!r} (pass a string of 4-6 digits, e.g. '2330')")
-    start_d, end_d = dt.date.fromisoformat(start), dt.date.fromisoformat(end)
+    start_d, end_d = to_date(start, "start"), to_date(end, "end")
     if start_d > end_d:
-        raise ValueError(f"start {start} is after end {end}")
-    months = [ensure_month(ticker, y, m) for y, m in _months_between(start_d, end_d)]
+        raise ValueError(f"start {start_d} is after end {end_d}")
+    wanted = _months_between(start_d, end_d)
+    to_download = [ym for ym in wanted if not _store.has_prices_month(_month_key(ticker, *ym))]
+    months = []
+    with Progress(f"daily prices for {ticker}", len(to_download)) as progress:
+        for year, month in wanted:
+            if (year, month) in to_download:
+                progress.step(f"{year:04d}-{month:02d}")
+            months.append(ensure_month(ticker, year, month))
     # Every month can come back empty (range outside available history, or a
     # ticker TWSE has no data for) — that is an empty result, not an error.
     frames = [f for f in months if not f.empty]

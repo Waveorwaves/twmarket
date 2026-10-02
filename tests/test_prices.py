@@ -80,3 +80,23 @@ def test_month_in_progress_is_not_cached(set_taipei_date, use_stock_day_fixture)
     tw.prices("2330", "2025-06-01", "2025-06-30")
     tw.prices("2330", "2025-06-01", "2025-06-30")
     assert use_stock_day_fixture == [("2330", 2025, 6), ("2330", 2025, 6)]
+
+
+def test_dates_can_be_date_objects(use_stock_day_fixture):
+    import pandas as pd
+
+    by_string = tw.prices("2330", "2025-06-05", "2025-06-10")
+    by_date = tw.prices("2330", dt.date(2025, 6, 5), dt.date(2025, 6, 10))
+    by_timestamp = tw.prices("2330", pd.Timestamp("2025-06-05"), pd.Timestamp("2025-06-10"))
+    assert by_string.equals(by_date) and by_string.equals(by_timestamp)
+
+
+def test_bad_date_says_which_argument():
+    with pytest.raises(ValueError, match="end must be a date like"):
+        tw.prices("2330", "2025-06-01", "2025/06/30")
+
+
+def test_calendar_helpers_accept_dates_and_datetimes():
+    assert len(tw.calendar(dt.date(2025, 1, 20), dt.date(2025, 1, 22))) == 3
+    assert tw.is_trading_day(dt.datetime(2025, 1, 22, 9, 30))
+    assert tw.next_trading_day(dt.date(2025, 1, 22)) == dt.date(2025, 2, 3)

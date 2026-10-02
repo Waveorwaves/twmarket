@@ -40,6 +40,18 @@ def data_dir() -> Path:
     return Path(os.environ.get("TWMARKET_DATA_DIR", "~/.twmarket")).expanduser()
 
 
+def _write_parquet(df: pd.DataFrame, path: Path) -> None:
+    """Write beside the target, then rename over it.
+
+    An interrupted run (Ctrl-C during a long backfill, a full disk) can then
+    leave a stray `.tmp` file, but never half a month where a whole one was.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    scratch = path.with_name(path.name + ".tmp")
+    df.to_parquet(scratch, index=False)
+    os.replace(scratch, path)
+
+
 def _revenue_path(period: str) -> Path:
     return data_dir() / "revenue" / f"{period}.parquet"
 
@@ -50,7 +62,17 @@ def has_revenue_period(period: str) -> bool:
 
 def load_revenue_period(period: str) -> pd.DataFrame | None:
     path = _revenue_path(period)
-    return pd.read_parquet(path) if path.exists() else None
+    if not path.exists():
+        return None
+    try:
+        return pd.read_parquet(path)
+    except (OSError, ValueError) as err:
+        # Not re-downloaded automatically: the file may hold observed announce
+        # dates and restatements that MOPS can no longer supply.
+        raise RuntimeError(
+            f"{path} cannot be read ({err}). Delete that file to download the month "
+            "again; any observed dates or restatements recorded in it are lost."
+        ) from err
 
 
 def _checked_path() -> Path:
@@ -102,16 +124,25 @@ def _prices_path(key: str) -> Path:
     return data_dir() / "prices" / f"{key}.parquet"
 
 
+def has_prices_month(key: str) -> bool:
+    return _prices_path(key).exists()
+
+
 def load_prices_month(key: str) -> pd.DataFrame | None:
     """key = '{ticker}_{YYYY-MM}'. Returns None if not cached."""
     path = _prices_path(key)
-    return pd.read_parquet(path) if path.exists() else None
+    if not path.exists():
+        return None
+    try:
+        return pd.read_parquet(path)
+    except (OSError, ValueError):
+        # Prices are a plain cache of what TWSE serves, so fetch the month again.
+        logger.warning("%s cannot be read; downloading that month again", path)
+        return None
 
 
 def save_prices_month(key: str, df: pd.DataFrame) -> None:
-    path = _prices_path(key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(path, index=False)
+    _write_parquet(df, _prices_path(key))
 
 
 def normalize_revenue(df: pd.DataFrame) -> pd.DataFrame:
@@ -126,9 +157,7 @@ def normalize_revenue(df: pd.DataFrame) -> pd.DataFrame:
 def append_revenue_observations(period: str, df: pd.DataFrame) -> None:
     """Append observation rows for one period (never overwrites existing rows)."""
     df = normalize_revenue(df)
-    path = _revenue_path(period)
-    existing = pd.read_parquet(path) if path.exists() else None
+    existing = load_revenue_period(period)
     if existing is not None:
         df = pd.concat([existing, df], ignore_index=True)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(path, index=False)
+    _write_parquet(df, _revenue_path(period))

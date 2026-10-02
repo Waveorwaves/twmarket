@@ -1,6 +1,6 @@
 # twmarket — v0.1.1 Fix Plan
 
-Written 2026-08-19. **Updated 2026-10-01** with status and decisions (see below).
+Written 2026-08-19. **Updated 2026-10-02** with status and decisions (see below).
 Execution target: Claude Code, working in the `twmarket` repo.
 
 Findings come from a review of the shipped v0.1.0 tree: 37 tests pass, `ruff check`
@@ -12,27 +12,30 @@ Every fix lands with a test that fails before it and passes after.
 
 ---
 
-## Status — 2026-10-01
+## Status — 2026-10-02
 
-**All code work for v0.1.1 is done.** What remains is release hygiene (P3): changelog,
-version bump, tags, and the PyPI publish.
+**The code and the release files for v0.1.1 are done.** What remains is for the repo
+owner: register the PyPI publisher, push the tags, set the GitHub description (P3).
 
 | Item | Status |
 | --- | --- |
 | P0 — `sync()` false announce dates | ✅ Done, `e71a6f5` |
 | P1 — silent failure in `sync_period` | ✅ Done, `eda3719` |
-| P1 — unknown ticker costs ~140 fetches | ✅ Done 2026-10-01 |
+| P1 — unknown ticker costs ~140 fetches | ✅ Done, `d954ea6` |
 | P2 — coverage gaps | ✅ Done: 98%, CI gate at 90% |
 | P2 — `parse_bulk_file` fails open | ✅ Done: zero-row raise, row floor, 合計 check removed |
 | P2 — spec conflicts with `twmarket.md` | ✅ All four resolved |
 | Review 2026-09-29 — four further defects | ✅ Done, `d954ea6` (see "Independent review") |
 | Found 2026-10-01 — late filers, re-downloads, pre-2013 | ✅ Done, `9babe53` (see "Found after the review") |
-| Review 2026-10-01 — months frozen too early; README overclaim | ✅ Done 2026-10-01 (see "Second review") |
+| Review 2026-10-01 — months frozen too early; README overclaim | ✅ Done, `330b25b` (see "Second review") |
+| P3 — release files, first-run progress line, docs tidy-up | ✅ Done 2026-10-02 |
+| Pre-release testing round 2026-10-02 — five more defects | ✅ Done (see "Pre-release testing") |
+| P3 — tags, PyPI publisher, repo metadata | **Owner's steps — next** |
 | Open question — do financials file late every month? | **Unknown.** Needs daily `sync()` across a 10th–20th |
-| P3 — repository hygiene | **Open — next.** History decision made (leave as is) |
 
-Current tree: 169 tests pass on Python 3.12 / pandas 3 and Python 3.10 / pandas 2.3 (the
-CI matrix), `ruff check` clean, 98% coverage.
+Current tree: 191 tests pass on Python 3.10 to 3.14 and on the oldest declared
+dependencies (pandas 2.0.0, pyarrow 14.0.0, requests 2.28.0), `ruff check` clean, 99%
+coverage.
 
 ## Decisions
 
@@ -388,48 +391,85 @@ tickers get `announce_date` after the deadline.
 
 ---
 
+## Pre-release testing — 2026-10-02
+
+A last round before release, testing as a first-time user would instead of along the
+paths already known to work.
+
+**What was run**
+
+- **The whole history from an empty store**, with the built wheel in a clean
+  environment: `tw.revenue("2330", "2013-01")` downloaded 164 months in 16m 01s with no
+  error. On the result — 147,812 rows — no duplicate `(period, ticker)`, no gaps, no
+  missing revenue, every announce date a real trading day and none before its deadline.
+  Published month-on-month figures agree with the stored revenue in 100.00% of 146,480
+  comparable rows, year-on-year in 97.53% of 135,553 (the rest are prior-year figures
+  MOPS has since revised). 86 negative values are real: investment and financial
+  companies report profit and loss as revenue.
+- **Prices for seven tickers** including thin ones, a 5-digit ETF and a 6-digit code:
+  days without trades come back with missing prices and zero volume; low ≤ open/close ≤
+  high everywhere; every date is in the calendar.
+- **Six environments:** Python 3.10, 3.11, 3.12, 3.13 and 3.14, and Python 3.10 with the
+  oldest declared dependencies. All pass. CI now also runs 3.14.
+- **Nineteen wrong or unusual inputs**, and **damaged store files**.
+
+**What it found (all fixed)**
+
+1. **Date objects were rejected** with `TypeError: fromisoformat: argument must be str`
+   — for `as_of`, `prices()` and `calendar()`. A `date`, `datetime` or pandas `Timestamp`
+   is now accepted, and a wrong date names the argument and the expected form.
+2. **A half-written store file broke every later query** with a pyarrow error that named
+   neither the file nor a remedy. Likely, because a 16-minute download invites Ctrl-C.
+   Writes are now write-then-rename; an unreadable price month is downloaded again; an
+   unreadable revenue month raises an error naming the file (it may hold observations
+   that cannot be re-downloaded, so it is not replaced silently).
+3. **Every query re-downloaded the month still being filed**, so a loop over 100 tickers
+   made 100 identical requests to MOPS. It is now compared at most once per ten minutes
+   per process: twelve tickers of full history take 6.9s and four requests in total.
+4. **The progress line used a terminal escape code** that older Windows consoles print
+   literally. It now pads with spaces.
+5. **Asking for an ETF's revenue said "check for a typo".** The message now says ETFs
+   and funds report no revenue.
+
+**Still untested, stated in the README:** Windows; two processes using one store at
+once. **Cannot be tested before release:** the upload to PyPI itself. A failed upload
+publishes nothing and can be retried.
+
+---
+
 ## P3 — Repository hygiene
 
-Independent of the code. Can be done in any order, except that **5 waits for P1 and
-P2**.
+Status as of 2026-10-02. Items 2, 3 and 5 end with steps only the repo owner can take.
 
-1. ~~**Rewrite history.**~~ **✅ Decided 2026-09-28: leave as is.** Authorship is
-   already fixed — all 11 commits are `Waveorwaves <jason890427@ymail.com>`. The
-   `Generated with [Devin](https://devin.ai)` line remains in the nine Step 0–8 commit
-   messages; it is plain text, not a `Co-authored-by:` trailer, so GitHub shows no
-   co-author. Not worth a force-push to published `main`.
-2. **Tag and release.** v0.1.0 was never tagged: tag Step 8 (`5aed57f`) as `v0.1.0`, then tag `v0.1.1` at release. Cut GitHub
-   Releases. Add `CHANGELOG.md` (moved here from P0), with `e71a6f5`'s fixes under
-   `[0.1.1] → Fixed`.
-3. **Repo metadata.** Set the GitHub description and topics (`taiwan`, `twse`, `mops`,
-   `quant`, `point-in-time`, `market-data`). The repo currently has neither, so it
-   surfaces below competitors in search.
-4. ~~**Docs site.**~~ **Deferred to v0.2** (decision 2026-09-28). The
-   `git mv twmarket.md docs/spec.md` move goes with it; the README links `twmarket.md`
-   by its current path.
-5. **PyPI — in v0.1.1, gated on P1 and P2.** Add a `pypa/gh-action-pypi-publish` job
-   triggered on tag push, using trusted publishing (no stored API token). Bump the
-   version in **both** `pyproject.toml` and `src/twmarket/__init__.py`. Then the README
-   install line becomes `pip install twmarket`.
-   *Checked 2026-09-28:* the name `twmarket` is unclaimed on PyPI. It is claimed by the
-   first upload, not before.
-6. **README badges.** CI status, supported Python versions, licence; PyPI version once
-   published.
-7. **Reposition the README opening.** It currently leads with English documentation.
-   TW Market Data (twmarketdata.com) is a funded commercial API with SDKs, an MCP
-   server, `llms.txt`, and real SEO — they will own "Taiwan stock data in English."
-   Lead with the defensible claim instead: honest announce timing. Their monthly-revenue
-   schema is `symbol / revenue_month / revenue / revenue_yoy / revenue_mom` — no
-   announce date, no `as_of`, no restatement history — and their own pricing page
-   disclaims a backtest-grade baseline and lists delisted coverage as pending.
-8. **Comparison table.** Add to `docs/` a single-axis comparison — twmarket vs FinMind
-   vs TW Market Data — on one question: does it expose an announce date you can filter
-   on? Naming competitors honestly and comparing on one stated axis reads as expertise.
-   Do not claim to beat them on breadth; they win that decisively. (A plain Markdown
-   file; no docs site needed.)
-9. **Track this plan and the lockfile** (added 2026-09-28). Commit `Fixplan.md`. Decide
-   on `uv.lock` (untracked since 2026-09-22): commit it if uv is now the workflow. CI
-   installs with pip either way.
+1. ~~**Rewrite history.**~~ **✅ Decided 2026-09-28: leave as is.** Every commit is
+   authored `Waveorwaves`. The `Generated with [Devin](https://devin.ai)` line remains
+   in the nine Step 0–8 commit messages; it is plain text, not a `Co-authored-by:`
+   trailer, so GitHub shows no co-author. Not worth a force-push to published `main`.
+2. **Tag and release.** ✅ `CHANGELOG.md` written. **Owner:** tag Step 8 (`5aed57f`) as
+   `v0.1.0`, tag the release commit as `v0.1.1`, and cut GitHub Releases.
+3. **Repo metadata.** **Owner:** set the GitHub description and topics (`taiwan`,
+   `twse`, `mops`, `quant`, `point-in-time`, `market-data`). The repo has neither.
+4. ~~**Docs site.**~~ **Deferred to v0.2** (decision 2026-09-28). The spec and this plan
+   moved to `docs/dev/` on 2026-10-02 so the repo root holds only what a user needs.
+5. **PyPI.** ✅ `.github/workflows/publish.yml` publishes on a `v*` tag with trusted
+   publishing (no stored token) and refuses a tag that does not match the package
+   version. ✅ Version is `0.1.1` in both `pyproject.toml` and
+   `src/twmarket/__init__.py`. ✅ README install line is `pip install twmarket`.
+   **Owner:** register the trusted publisher on pypi.org before pushing the tag. The
+   name `twmarket` was unclaimed on 2026-09-28; the first upload claims it.
+6. **README badges.** ✅ CI, PyPI version, Python versions, licence.
+7. ~~**Reposition the README opening.**~~ **Withdrawn 2026-10-02.** This item rested on
+   claims about what other Taiwan-data projects lack. Checked against their own
+   documentation on 2026-10-01, those claims no longer hold. The README describes what
+   twmarket does and makes no comparison.
+8. ~~**Comparison table.**~~ **Withdrawn 2026-10-02**, for the same reason. A comparison
+   that goes stale is worse than none.
+9. **Track this plan and the lockfile.** ✅ This plan is tracked. `uv.lock` is still
+   untracked: commit it if uv is the workflow; CI installs with pip either way.
+10. **First-run experience** (added 2026-10-02). ✅ A fresh install from GitHub ran every
+    README call correctly, but the first one sat silent for 112 seconds. Downloads of
+    three or more months now show a one-line progress counter on stderr
+    (`TWMARKET_PROGRESS=0` turns it off), and the README states the real timings.
 
 ---
 
@@ -466,6 +506,8 @@ The v0.2 parking lot exists. Use it.
 - [x] Months re-checked until their window closes; README no longer claims estimates
       are never early (2026-10-01)
 - [x] History decision made: leave as is (2026-09-28)
-- [ ] `v0.1.0` and `v0.1.1` tagged
+- [x] Release files ready: changelog, version 0.1.1 in both places, publish workflow,
+      README install line (2026-10-02)
+- [ ] `v0.1.0` and `v0.1.1` tagged (owner)
 - [ ] `v0.1.1` published to PyPI by trusted publishing from the tag; README install line
       updated

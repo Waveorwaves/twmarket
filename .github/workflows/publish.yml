@@ -1,0 +1,36 @@
+name: Publish
+
+# Pushing a version tag (v0.1.1) builds the package and uploads it to PyPI.
+# Authentication is PyPI "trusted publishing": PyPI trusts this workflow in this
+# repository, so no password or API token is stored anywhere.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # lets PyPI verify the upload comes from this workflow
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]" build
+      - name: Tag must match the package version
+        run: |
+          version=$(python -c "import twmarket; print(twmarket.__version__)")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $version" >&2
+            exit 1
+          fi
+      - name: Test
+        run: ruff check . && pytest --cov=twmarket --cov-fail-under=90
+      - name: Build
+        run: python -m build
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

@@ -183,3 +183,47 @@ def test_revenue_before_2013_is_rejected_up_front(use_mops_fixture):
     with pytest.raises(ValueError, match="2013-01"):
         tw.revenue("2330", "2012-12", "2013-03")
     assert use_mops_fixture == []
+
+
+def test_as_of_can_be_a_date_object(use_mops_fixture):
+    by_string = tw.revenue("2330", "2025-06", "2025-06", as_of="2025-07-10")
+    by_date = tw.revenue("2330", "2025-06", "2025-06", as_of=dt.date(2025, 7, 10))
+    assert len(by_date) == 1 and by_string.equals(by_date)
+    with pytest.raises(ValueError, match="as_of must be a date like"):
+        tw.revenue("2330", "2025-06", "2025-06", as_of="July 10")
+
+
+def test_asking_for_an_etf_explains_why_it_is_not_there(use_mops_fixture):
+    with pytest.raises(ValueError, match="ETFs and funds"):
+        tw.revenue("0050", "2025-06", "2025-06")
+
+
+def test_ticker_loop_downloads_a_month_still_being_filed_only_once(
+    set_taipei_date, use_mops_fixture
+):
+    """Research loops over tickers. The month that is still open must not be
+    fetched again for each one: that is slow, and it hammers MOPS."""
+    set_taipei_date(2025, 7, 5)  # June's filing window is open: never cached on disk
+    for ticker in ("2330", "1101", "2317"):
+        assert len(tw.revenue(ticker, "2025-06", "2025-06")) == 1
+    assert use_mops_fixture == [(114, 6)]
+
+
+def test_ticker_loop_rechecks_a_stored_month_only_once(set_taipei_date, use_mops_fixture):
+    set_taipei_date(2025, 7, 15)  # past the deadline, inside the re-check window
+    for ticker in ("2330", "1101", "2317"):
+        assert len(tw.revenue(ticker, "2025-06", "2025-06")) == 1
+    assert use_mops_fixture == [(114, 6)]
+
+
+def test_an_open_month_is_looked_at_again_once_the_interval_has_passed(
+    set_taipei_date, use_mops_fixture, monkeypatch
+):
+    import sys
+
+    # `twmarket.revenue` is the public function; the module is reached through sys.modules.
+    monkeypatch.setattr(sys.modules["twmarket.revenue"], "RECHECK_INTERVAL_SECONDS", 0)
+    set_taipei_date(2025, 7, 5)
+    tw.revenue("2330", "2025-06", "2025-06")
+    tw.revenue("2330", "2025-06", "2025-06")
+    assert use_mops_fixture == [(114, 6), (114, 6)]

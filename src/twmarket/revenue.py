@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import re
+import time
 
 import pandas as pd
 
@@ -15,7 +16,9 @@ from ._dates import (
     parse_period,
     statutory_deadline,
     taipei_today,
+    to_date,
 )
+from ._progress import Progress
 from .calendar import REFERENCE_TICKERS, trading_days
 
 logger = logging.getLogger("twmarket")
@@ -36,6 +39,11 @@ ANNOUNCE_ROLL_WINDOW_DAYS = 14
 #: roughly a thousand companies (990 in the 2025-06 file), so a settled file with
 #: fewer than half that is a truncated or re-laid-out page, not a quiet month.
 MIN_SETTLED_ROWS = 500
+
+#: A month that can still change is compared with MOPS at most this often within one
+#: process. Research loops over tickers: without this, every ticker would download
+#: the same still-open month again.
+RECHECK_INTERVAL_SECONDS = 600
 
 OUTPUT_COLUMNS = [
     "ticker", "period", "revenue_twd", "yoy_pct", "mom_pct",
@@ -214,6 +222,26 @@ def _is_final(stored: pd.DataFrame, period: str) -> bool:
     return last_checked(period, stored) >= recheck_window_end(period)
 
 
+# Recent comparisons with MOPS, per (store, period, day): when it happened, and the
+# rows if they were served without being stored.
+_recent_checks: dict[tuple[str, str, dt.date], tuple[float, pd.DataFrame | None]] = {}
+
+
+def _recent_check(key: tuple[str, str, dt.date]) -> tuple[float, pd.DataFrame | None] | None:
+    entry = _recent_checks.get(key)
+    if entry is not None and time.monotonic() - entry[0] < RECHECK_INTERVAL_SECONDS:
+        return entry
+    return None
+
+
+def _remember_check(key: tuple[str, str, dt.date], rows: pd.DataFrame | None = None) -> None:
+    now = time.monotonic()
+    expired = [k for k, (at, _) in _recent_checks.items() if now - at >= RECHECK_INTERVAL_SECONDS]
+    for stale in expired:
+        del _recent_checks[stale]
+    _recent_checks[key] = (now, rows)
+
+
 def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
     """All stored observations for one period, fetching the bulk file if needed.
 
@@ -223,25 +251,36 @@ def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
     month would read as complete forever. A stored period that is not final yet
     (see `recheck_window_end`) is topped up through the differ, which appends
     late filers without duplicating what is already held.
+
+    Either way, a month that can still change is compared with MOPS at most once
+    per `RECHECK_INTERVAL_SECONDS` in a process.
     """
     today = today or taipei_today()
+    key = (str(_store.data_dir()), period, today)
     stored = _store.load_revenue_period(period)
     if stored is not None and not stored.empty:
-        if _is_final(stored, period):
+        if _is_final(stored, period) or _recent_check(key):
             return stored
         from .sync import sync_period  # deferred: sync builds on this module
 
         sync_period(period, today=today)
+        _remember_check(key)
         return _store.load_revenue_period(period)
+
+    recent = _recent_check(key)
+    if recent is not None and recent[1] is not None:
+        return recent[1]
 
     year, month = parse_period(period)
     logger.info("fetching MOPS bulk file for %s", period)
     content = _client.fetch_mops_revenue(gregorian_year_to_roc(year), month)
     df = parse_bulk_file(content, period)
     if df.empty:
-        # Not published yet. Never cache it: the next query should ask again.
+        # Not published yet. Never cache it on disk: a later query should ask again.
         logger.info("%s is not published on MOPS yet", period)
-        return _store.normalize_revenue(pd.DataFrame(columns=list(_store.REVENUE_COLUMNS)))
+        df = _store.normalize_revenue(pd.DataFrame(columns=list(_store.REVENUE_COLUMNS)))
+        _remember_check(key, df)
+        return df
     announce = announce_date_for(period)
     df["announce_date"] = announce
     df["announce_date_estimated"] = True
@@ -253,12 +292,14 @@ def ensure_period(period: str, today: dt.date | None = None) -> pd.DataFrame:
         check_settled_row_count(df, period)
         _store.append_revenue_observations(period, df)
         _store.mark_revenue_checked(period, today)
+        _remember_check(key)
     else:
         logger.info(
             "%s filing window is still open (deadline %s) — serving fresh, not caching",
             period,
             announce,
         )
+        _remember_check(key, df)
     return df
 
 
@@ -297,7 +338,7 @@ def get_revenue(
     if not isinstance(ticker, str) or not _TICKER_RE.fullmatch(ticker):
         raise ValueError(f"invalid ticker: {ticker!r} (pass a string of 4-6 digits, e.g. '2330')")
     start, end = start or BACKFILL_START, end or _last_completed_period()
-    as_of_date = dt.date.fromisoformat(as_of) if as_of else None
+    as_of_date = to_date(as_of, "as_of") if as_of is not None else None
     periods = _month_range(start, end)
     if not periods:
         raise ValueError(f"start {start} is after end {end}")
@@ -316,16 +357,21 @@ def get_revenue(
         if final and not df.empty:
             raise ValueError(
                 f"unknown ticker: {ticker!r} is not in MOPS's {period} file, the latest "
-                "final month of the requested range. Check for a typo. For a delisted "
-                "company pass an `end` no later than its last month; for a newly listed "
-                "one pass a range that starts at its first month."
+                "final month of the requested range. Check for a typo. ETFs and funds "
+                "(0050, 00878) report no revenue. For a delisted company pass an `end` no "
+                "later than its last month; for a newly listed one pass a range that "
+                "starts at its first month."
             )
         # Unpublished, or still able to gain late filers: absence proves nothing.
 
     frames = []
-    for period in periods:
-        df = loaded[period] if period in loaded else ensure_period(period, today)
-        frames.append(df[df["ticker"] == ticker])
+    to_download = {p for p in periods if p not in loaded and not _store.has_revenue_period(p)}
+    with Progress("monthly revenue", len(to_download)) as progress:
+        for period in periods:
+            if period in to_download:
+                progress.step(period)
+            df = loaded[period] if period in loaded else ensure_period(period, today)
+            frames.append(df[df["ticker"] == ticker])
 
     obs = pd.concat(frames, ignore_index=True)
     if as_of_date is not None:
